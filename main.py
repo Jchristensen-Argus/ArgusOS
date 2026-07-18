@@ -1,12 +1,9 @@
-from argus.identity import Identity
+from argus.shell import Shell
 
 
 def main():
-    argus = Identity()
-
-    print("=" * 60)
-    print(argus.introduce())
-    print("=" * 60)
+    shell = Shell()
+    shell.start()
 
 
 if __name__ == "__main__":
