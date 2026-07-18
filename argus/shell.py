@@ -1,9 +1,11 @@
 from argus.identity import Identity
+from argus.commands import CommandManager
 
 
 class Shell:
     def __init__(self):
         self.identity = Identity()
+        self.commands = CommandManager(self.identity)
 
     def start(self):
         print("=" * 60)
@@ -16,33 +18,5 @@ class Shell:
         while True:
             command = input("Argus > ").strip().lower()
 
-            if command == "help":
-                self.show_help()
-
-            elif command == "identity":
-                print()
-                print(self.identity.introduce())
-                print()
-
-            elif command == "version":
-                print(f"\nVersion: {self.identity.version}\n")
-
-            elif command in ("quit", "exit"):
-                print("\nGoodbye, Joel.")
+            if not self.commands.execute(command):
                 break
-
-            elif command == "":
-                continue
-
-            else:
-                print(f"\nUnknown command: {command}\n")
-
-    def show_help(self):
-        print("""
-Available Commands
-------------------
-help       Show this menu
-identity   Display Argus identity
-version    Display current version
-quit       Exit Argus
-""")
