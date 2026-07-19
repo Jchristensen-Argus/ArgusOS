@@ -9,6 +9,9 @@ class Memory:
         self.memory_file = Path("memory/memories.json")
         self.memories = self.load()
 
+    def recall(self):
+        return self.memories
+    
     def save(self):
         with open(self.memory_file, "w") as file:
             json.dump(self.memories, file, indent=4)

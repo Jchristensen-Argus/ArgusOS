@@ -1,4 +1,5 @@
 import os
+from argus.memory import Memory
 from argus.conversation import Conversation
 
 
@@ -6,11 +7,32 @@ class CommandManager:
     def __init__(self, identity):
         self.identity = identity
         self.conversation = Conversation()
+        self.memory = Memory()
 
     def execute(self, command):
         if command == "help":
             self.help()
 
+        elif command == "memories":
+
+            memories = self.memory.recall()
+
+            if not memories:
+                print("\nI don't have any memories yet.\n")
+        
+            else:
+                print("\nMemories:\n")
+            
+                for i, memory in enumerate(memories, start=1):
+                    print(f"{i}. {memory}")
+
+            print()
+        
+        elif command == "remember":
+            text = input("\nWhat would you like me to remember?\n> ")
+            self.memory.remember(text)
+            print("\nMemory stored.\n")
+        
         elif command == "identity":
             print()
             print(self.identity.introduce())
@@ -45,6 +67,8 @@ class CommandManager:
 Available Commands
 ------------------
 help
+remember
+memories            
 identity
 version
 status
