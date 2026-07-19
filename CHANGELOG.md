@@ -9,6 +9,11 @@ All notable changes to ArgusOS will be documented in this file.
 ---
 ### Added
 
+- Added `factory/standards/coding.md`.
+- Established coding standards for all ArgusOS implementations.
+
+### Added
+
 - Added `factory/templates/subsystem.md`.
 - Standardized the structure for all future subsystem specifications.
 
