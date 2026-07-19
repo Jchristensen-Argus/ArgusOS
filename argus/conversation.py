@@ -1,4 +1,9 @@
+from argus.ai import AI
+
 class Conversation:
+
+    def __init__(self):
+        self.ai = AI()
 
     def start(self):
         print("\n" + "=" * 60)
@@ -22,20 +27,11 @@ class Conversation:
             self.respond(user)
 
     def respond(self, message):
+
         print()
 
-        if "hello" in message.lower() or "hi" in message.lower():
-            print("Argus >")
-            print("Hello, Joel. It's good to see you.\n")
+        reply = self.ai.chat(message)
 
-        elif "how are you" in message.lower():
-            print("Argus >")
-            print("I'm doing great. Every version makes me a little smarter.\n")
-
-        elif "who are you" in message.lower():
-            print("Argus >")
-            print("I'm Argus, your AI operating system. One day I'll help you run your businesses and organize your life.\n")
-
-        else:
-            print("Argus >")
-            print("That's interesting. Soon a real AI model will answer instead of these scripted responses.\n")
+        print("Argus >")
+        print(reply)
+        print()
