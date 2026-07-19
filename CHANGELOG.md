@@ -9,6 +9,11 @@ All notable changes to ArgusOS will be documented in this file.
 ---
 ### Added
 
+- Added `factory/templates/subsystem.md`.
+- Standardized the structure for all future subsystem specifications.
+
+### Added
+
 - Added `factory/README.md`.
 - Established the onboarding guide for all future contributors.
 - Defined the recommended reading order and contribution workflow.
