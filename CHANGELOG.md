@@ -7,6 +7,14 @@ All notable changes to ArgusOS will be documented in this file.
 # ArgusOS Changelog
 
 ---
+## Argus Factory v0.1
+
+### Added
+
+- Introduced the Argus Factory engineering methodology.
+- Added the project charter (`design/ARGUS.md`).
+- Added engineering principles (`design/PRINCIPLES.md`).
+- Established the foundation for specification-driven development.
 
 ## v0.0.1 - The Spark
 
