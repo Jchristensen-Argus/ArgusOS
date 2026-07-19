@@ -1,5 +1,6 @@
 from argus.ai import AI
 from argus.brain import Brain
+from argus.memory import Memory
 
 
 class Conversation:
@@ -7,6 +8,7 @@ class Conversation:
     def __init__(self):
         self.ai = AI()
         self.brain = Brain()
+        self.memory = Memory()
 
     def start(self):
         print("\n" + "=" * 60)
@@ -21,6 +23,7 @@ class Conversation:
         print("Type 'exit' to return.\n")
 
         while True:
+
             user = input("You > ")
 
             if user.lower() == "exit":
@@ -33,12 +36,35 @@ class Conversation:
 
         print()
 
-        decision = self.brain.think(message)
+        intent = self.brain.think(message)
 
-        if decision == "chat":
-            reply = self.ai.chat(message)
+        if intent == "remember":
+
+            memory = message[len("remember"):].strip()
+
+            if memory:
+                self.memory.remember(memory)
+                reply = f"I'll remember that: {memory}"
+            else:
+                reply = "What would you like me to remember?"
+
+        elif intent == "memories":
+
+            memories = self.memory.recall()
+
+            if memories:
+
+                reply = "Here's what I remember:\n\n"
+
+                for i, memory in enumerate(memories, start=1):
+                    reply += f"{i}. {memory}\n"
+
+            else:
+                reply = "I don't have any memories yet."
+
         else:
-            reply = "I'm not sure how to handle that yet."
+
+            reply = self.ai.chat(message)
 
         print("Argus >")
         print(reply)

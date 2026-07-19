@@ -141,6 +141,19 @@ pythion
 - Established architecture for future intent detection
 - Created foundation for routing requests to memory, projects, agents, and tools
 
+## v0.0.9 - Intent Detection
+
+### Added
+- Brain routes user requests by intent.
+- Natural language "remember" command.
+- Natural language memory listing.
+- Conversation is no longer AI-centric.
+
+### Known Limitations
+- Memory retrieval is list-based.
+- Argus cannot yet answer questions directly from stored memories.
+- Knowledge Engine planned for v0.1.0.
+
 # Design Philosophy
 
 Argus is being built as a modular local AI operating system.

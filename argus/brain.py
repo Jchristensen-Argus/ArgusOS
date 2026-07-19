@@ -1,25 +1,23 @@
 class Brain:
     """
-    The Brain decides what Argus should do next.
+    The Brain decides what Argus should do.
 
-    It does not generate responses.
-    It routes requests to the appropriate subsystem.
+    It never performs the work itself.
+    It only identifies the user's intent.
     """
 
     def think(self, message):
-        """
-        Analyze the user's message and determine the intent.
 
-        Future intents may include:
-        - chat
-        - remember
-        - forget
-        - project
-        - quote
-        - email
-        - agent
+        text = message.lower().strip()
 
-        For now, everything is treated as normal chat.
-        """
+        if text.startswith("remember"):
+            return "remember"
+
+        if text in [
+            "memories",
+            "what do you remember",
+            "show my memories"
+        ]:
+            return "memories"
 
         return "chat"
