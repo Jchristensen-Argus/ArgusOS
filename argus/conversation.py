@@ -1,9 +1,12 @@
 from argus.ai import AI
+from argus.brain import Brain
+
 
 class Conversation:
 
     def __init__(self):
         self.ai = AI()
+        self.brain = Brain()
 
     def start(self):
         print("\n" + "=" * 60)
@@ -30,7 +33,12 @@ class Conversation:
 
         print()
 
-        reply = self.ai.chat(message)
+        decision = self.brain.think(message)
+
+        if decision == "chat":
+            reply = self.ai.chat(message)
+        else:
+            reply = "I'm not sure how to handle that yet."
 
         print("Argus >")
         print(reply)
