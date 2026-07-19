@@ -1,9 +1,11 @@
 import os
+from argus.conversation import Conversation
 
 
 class CommandManager:
     def __init__(self, identity):
         self.identity = identity
+        self.conversation = Conversation()
 
     def execute(self, command):
         if command == "help":
@@ -22,6 +24,9 @@ class CommandManager:
 
         elif command == "clear":
             os.system("cls" if os.name == "nt" else "clear")
+
+        elif command == "chat":
+            self.conversation.start()
 
         elif command in ("quit", "exit"):
             print("\nGoodbye, Joel.")
