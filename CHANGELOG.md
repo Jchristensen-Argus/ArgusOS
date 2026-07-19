@@ -9,6 +9,12 @@ All notable changes to ArgusOS will be documented in this file.
 ---
 ### Added
 
+### Added
+
+- Added `factory/workflow.md`.
+- Defined the standard engineering workflow for Argus Factory.
+- Established the lifecycle from vision through release.
+
 - Added `design/FACTORY.md`.
 - Defined the Argus Factory engineering organization.
 - Established the standard development workflow.
