@@ -7,9 +7,17 @@ All notable changes to ArgusOS will be documented in this file.
 # ArgusOS Changelog
 
 ---
+### Added
+
+- Added `design/FACTORY.md`.
+- Defined the Argus Factory engineering organization.
+- Established the standard development workflow.
+- Defined engineering roles and responsibilities.
+
 ## Argus Factory v0.1
 
 ### Added
+
 
 - Introduced the Argus Factory engineering methodology.
 - Added the project charter (`design/ARGUS.md`).
