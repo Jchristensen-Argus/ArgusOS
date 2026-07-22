@@ -226,3 +226,39 @@ Future systems:
 - Vision
 - Documents
 - Packaging Intelligence
+---
+
+### Added
+
+- Added `argus/container.py` — minimal dependency injection Container (register/resolve/has).
+- Added `argus/configuration.py` — Configuration loader (JSON file with built-in defaults, no Event Bus wiring yet).
+- Added `argus/logging_service.py` — stdlib-backed Logging Service initialization, replacing `print()` per the coding standard.
+- Added `argus/application.py` — Application lifecycle (start/shutdown) over the Container.
+- Added `argus/bootstrap.py` — startup sequence: Container → Configuration → Logging → service registration → Application start.
+- Added `config/default.json` — default configuration values consumed by `Configuration.load()`.
+- Added unit tests for Container, Configuration, Logging Service, Application, and bootstrap under `tests/`, built entirely on the standard library `unittest` module (no external test runner required). Run with `python -m unittest discover` from the repository root.
+- Added `factory/standards/CODING_STANDARD.md` as the single canonical coding standard, consolidating the prior `CODING_STANDARDS.md` and `coding.md`.
+
+### Changed
+
+- `main.py` now runs the Package 002 Bootstrap sequence instead of launching the legacy interactive Shell directly.
+
+### Fixed
+
+- Rewrote `tests/` from pytest-style bare functions to standard library `unittest.TestCase` classes. Architecture review found the original tests undiscoverable by `python -m unittest` / `python -m unittest discover` (unittest's loader only collects `TestCase` subclasses) and dependent on an undeclared `pytest` package. All 21 tests now run with zero external dependencies via `python -m unittest discover`.
+- Added `tests/__init__.py` so the test package discovers reliably.
+
+### Removed
+
+- Removed `factory/standards/CODING_STANDARDS.md` and `factory/standards/coding.md`, superseded by `factory/standards/CODING_STANDARD.md`.
+
+### Deprecated
+
+- `factory/packages/001_FOUNDATION.md` is retired as an implementation package; retained as historical planning documentation only. `factory/packages/002_BOOTSTRAP.md` is the authoritative Bootstrap package.
+
+### Known Limitations
+
+- Configuration and Logging implementations are minimal (Bootstrap-stage only). Full CONFIGURATION.md / LOGGING.md compliance (validation, feature flags, hot reload, Event Bus change notification, retention, audit, log querying) is deferred to future implementation packages.
+- Event Bus is not initialized in this package; out of scope for Package 002 - Bootstrap.
+- The legacy interactive Shell (`argus/shell.py` and related modules) is not invoked from `main.py` pending a future package that reintegrates it on top of this foundation.
+- `design/specifications/CORTEX.md` does not yet exist, though Cortex is referenced as one of the five core engines in `INTERFACES.md` and `IMPLEMENTATION_PLAN.md`. Logged as an architectural backlog item; not required for Bootstrap.

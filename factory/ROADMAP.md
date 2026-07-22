@@ -6,12 +6,12 @@
 - [x] Coding Standards
 - [x] ADR Process
 - [x] Implementation Packages
-- [ ] Bootstrap
-- [ ] Configuration
-- [ ] Logging
+- [x] Bootstrap
+- [ ] Configuration (minimal loader shipped with Bootstrap; full CONFIGURATION.md service still pending)
+- [ ] Logging (minimal service shipped with Bootstrap; full LOGGING.md service still pending)
 - [ ] Event Bus
-- [ ] Dependency Injection
-- [ ] Lifecycle
+- [x] Dependency Injection
+- [x] Lifecycle
 
 ---
 
