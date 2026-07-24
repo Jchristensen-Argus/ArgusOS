@@ -10,6 +10,7 @@
 - [ ] Configuration (minimal loader shipped with Bootstrap; full CONFIGURATION.md service still pending)
 - [ ] Logging (minimal service shipped with Bootstrap; full LOGGING.md service still pending)
 - [x] Event Bus
+- [x] Service Registry
 - [x] Dependency Injection
 - [x] Lifecycle
 

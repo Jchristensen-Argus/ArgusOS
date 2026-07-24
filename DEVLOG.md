@@ -53,3 +53,23 @@ A few judgment calls, all grounded directly in the spec text rather than invente
 Registered `InMemoryEventBus` in the Container from `bootstrap.py` only. Left `Application.start()`/`shutdown()` untouched — the work order's objectives call for DI registration, not for lifecycle wiring, and Package 002's lifecycle was explicitly marked "preserve exactly." Flagged as a natural next package rather than folded in here.
 
 All 21 Package 002 tests plus 27 new tests pass under `python -m unittest discover` — 48 total, no pytest anywhere.
+
+---
+
+## Package 004 – Service Registry
+
+Built the operating system's authoritative service directory: an immutable `ServiceDescriptor` (name/instance/interface/version/state/metadata, metadata wrapped in `MappingProxyType` the same way `Event`'s payload/metadata were in Package 003), a `ServiceState` enum, an `IServiceRegistry` contract, and `InMemoryServiceRegistry` — a deterministic, name-keyed registry with explicit exceptions for duplicate registration and unknown-name lookups.
+
+A few decisions worth flagging:
+
+`register()` takes a fully-constructed `ServiceDescriptor` rather than loose parameters — keeps the "no business logic" constraint on `ServiceDescriptor` honest (it's pure data; the registry doesn't build it) and keeps `InMemoryServiceRegistry` focused purely on storage/lookup.
+
+`resolve()` returns the raw service instance (`descriptor.instance`), not the descriptor, matching `Container.resolve()`'s existing behavior; `list_services()` returns the full descriptors so callers can still introspect version/state/metadata/interface when enumerating.
+
+`unregister()` of a name that was never registered raises `ServiceNotFoundError` rather than no-op — same reasoning as `EventBus.unsubscribe()` in Package 003: "never silently fail" plus the established precedent.
+
+`ServiceState` has no separate module: the work order's package structure lists five files with no room for a `service_state.py`, so it lives in `service_descriptor.py` next to the dataclass that uses it, the same way `EventType`/`EventPriority` both live in `event_types.py`.
+
+Registered `InMemoryServiceRegistry` in the Container from `bootstrap.py` only, in the exact position specified (between Event Bus and Application). Did not populate the registry with the existing services (Configuration, Logger, Event Bus) — the spec's Bootstrap Integration section asks for registering the Service Registry itself, not for using it yet.
+
+72 tests total (48 from Packages 002/003 plus 24 new), all passing under `python -m unittest discover`, no pytest anywhere.

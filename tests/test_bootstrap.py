@@ -5,6 +5,7 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
+from argus.services import IServiceRegistry, InMemoryServiceRegistry
 
 
 class BootstrapTests(unittest.TestCase):
@@ -34,6 +35,17 @@ class BootstrapTests(unittest.TestCase):
             event_bus = application.container.resolve("event_bus")
             self.assertIsInstance(event_bus, IEventBus)
             self.assertIsInstance(event_bus, InMemoryEventBus)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_service_registry_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("service_registry"))
+            service_registry = application.container.resolve("service_registry")
+            self.assertIsInstance(service_registry, IServiceRegistry)
+            self.assertIsInstance(service_registry, InMemoryServiceRegistry)
         finally:
             application.shutdown()
 

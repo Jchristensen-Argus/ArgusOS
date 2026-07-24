@@ -286,3 +286,26 @@ Future systems:
 - The Event Bus is synchronous and in-process only, per Package 003's explicit non-goals (no asyncio, threads, queues, external brokers, persistence, replay, distributed messaging, priority scheduling, middleware, filtering, or network transport).
 - `Application.start()` / `Application.shutdown()` do not publish `SYSTEM_STARTED` / `SYSTEM_STOPPING` / `SYSTEM_STOPPED` events. Package 003's objectives call for registering the Event Bus in the DI container, not for wiring it into the existing lifecycle, and Package 002's lifecycle was explicitly preserved as-is. Recommended as a follow-up package.
 - `EventType` and `EventPriority` are both defined in `event_types.py` (the module list in the work order named one file for "types"); `event.py` imports both from there.
+
+---
+
+### Added
+
+- Added `argus/services/` package (Package 004 - Service Registry):
+  - `service_descriptor.py` — `ServiceState` enum (`REGISTERED`, `ACTIVE`, `STOPPED`) and the immutable `ServiceDescriptor` dataclass (`name`, `instance`, `interface`, `version`, `state`, `metadata`), with `metadata` defaulting to and always wrapped in an immutable `MappingProxyType`.
+  - `interfaces.py` — `IServiceRegistry` abstract contract (`register`, `unregister`, `resolve`, `contains`, `list_services`).
+  - `exceptions.py` — `ServiceRegistrationError`, `ServiceNotFoundError`.
+  - `service_registry.py` — `InMemoryServiceRegistry`, a deterministic, in-memory registry keyed by service name, preserving registration order and rejecting invalid/duplicate registrations and unknown-name lookups explicitly.
+  - `__init__.py` — re-exports the package's public API.
+- Added `tests/test_service_descriptor.py` and `tests/test_service_registry.py` (24 new tests).
+- Extended `tests/test_bootstrap.py` with a test confirming the Service Registry resolves from the Container as both `IServiceRegistry` and `InMemoryServiceRegistry`.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `InMemoryServiceRegistry` and registers it in the Container as `"service_registry"`, immediately after the Event Bus registers and before the Application is constructed. Bootstrap order is now Container → Configuration → Logging → Event Bus → Service Registry → Application. No other part of the startup sequence changed.
+
+### Known Limitations
+
+- The Service Registry does not auto-populate: Configuration, the Logger, the Event Bus, and the Service Registry itself are registered in the DI Container as before, but none of them are also registered as entries *inside* the Service Registry by this package. Bootstrap Integration in Package 004's spec calls for registering the Service Registry itself using the existing Container pattern, not for populating it; populating it is a natural follow-up once real service-oriented subsystems (Memory, Scheduler, Cortex, Atlas, Hermes) exist to register.
+- `ServiceDescriptor.state` has no default value (unlike `metadata`, which the spec explicitly defaults). Every caller must pass a `ServiceState` explicitly; the registry does not infer or transition it, per this package's non-goals (no automatic startup, no health monitoring, no event-driven lifecycle).
+- `InMemoryServiceRegistry` takes no logger and publishes no events. Unlike the Event Bus (Package 003), Package 004's specification does not include a Logging section, so no logging dependency was added.
