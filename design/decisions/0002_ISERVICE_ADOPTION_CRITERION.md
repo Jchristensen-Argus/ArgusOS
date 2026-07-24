@@ -182,3 +182,41 @@ options already proposed above (inject `LifecycleManager` + name so
 treat `LifecycleManager` as the only source of truth). This ADR's Status
 remains `Proposed`, per instruction; only the Founder/Architect elevates it
 to `Accepted` or opens the follow-up package.
+
+## Empirical Finding (Package 009 - Intent Router)
+
+`IIntentRouter` also inherits `IService`, per the Founder's explicit
+Package 009 work order, making `IntentRouter` a second real adopter.
+It confirms a *different* facet of this ADR's concern than Scheduler
+did.
+
+Scheduler (Package 008) showed two things at once: the duplicate-state
+risk is real, and `IService` *can* carry genuine behavior (`tick()`
+is gated on `RUNNING`). IntentRouter isolates the first finding from
+the second: it tracks its own `LifecycleState` the same way Scheduler
+does, to satisfy `status()`, but none of `parse()`, `route()`, or
+`register_handler()` are gated by that state in any way. Calling
+`parse()` on a router that has never been started behaves identically
+to calling it on one that has been started and stopped. `IService` is
+implemented here purely to satisfy the interface requirement in the
+work order, not because IntentRouter has any phased behavior for
+`start()`/`stop()` to enable or disable.
+
+This means the duplicate-state risk this ADR describes now applies to
+a service with *no* compensating behavioral benefit from adopting
+`IService` at all - for `IntentRouter`, the interface costs a second
+source of truth for lifecycle state and buys nothing in return. This
+sharpens, rather than changes, the original proposed criterion
+("adopt `IService` only when `start()`/`stop()` would do real,
+distinct work"): `IntentRouter` is close to a counterexample the
+criterion would have screened out, had it been binding rather than
+Proposed.
+
+**Recommendation:** unchanged from the Package 008 finding above - this
+adds a second, differently-shaped data point in favor of a dedicated
+architectural package to resolve `IService.status()`'s duplication,
+and now also in favor of that package deciding whether `IService`
+adoption should require a genuine behavioral gate as a precondition,
+not just a self-tracked state variable. This ADR's Status remains
+`Proposed`, per standing instruction; only the Founder/Architect
+elevates it to `Accepted` or opens the follow-up package.

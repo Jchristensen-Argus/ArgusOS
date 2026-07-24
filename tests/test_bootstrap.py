@@ -5,6 +5,7 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
+from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
@@ -20,6 +21,7 @@ CORE_SERVICE_NAMES = (
     "knowledge_service",
     "memory_service",
     "scheduler",
+    "intent_router",
 )
 
 
@@ -104,6 +106,17 @@ class BootstrapTests(unittest.TestCase):
             scheduler = application.container.resolve("scheduler")
             self.assertIsInstance(scheduler, IScheduler)
             self.assertIsInstance(scheduler, Scheduler)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_intent_router_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("intent_router"))
+            intent_router = application.container.resolve("intent_router")
+            self.assertIsInstance(intent_router, IIntentRouter)
+            self.assertIsInstance(intent_router, IntentRouter)
         finally:
             application.shutdown()
 

@@ -19,6 +19,7 @@ CORE_SERVICE_NAMES = (
     "knowledge_service",
     "memory_service",
     "scheduler",
+    "intent_router",
 )
 
 

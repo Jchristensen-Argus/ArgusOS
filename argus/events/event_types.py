@@ -66,3 +66,19 @@ class EventType(Enum):
     TASK_CANCELLED = "task_cancelled"
     TASK_PAUSED = "task_paused"
     TASK_RESUMED = "task_resumed"
+
+    # Added by Package 009 - Intent Router, per this module's own
+    # "single place new event types are added" scope note above.
+    # IntentRouter publishes these on the existing Event Bus (see
+    # argus/intent/router.py). INTENT_PARSED fires for every parse()
+    # call, including UNKNOWN results (there is no such thing as
+    # invalid string input to the parser - only unrecognized-but-
+    # valid string input). INTENT_ROUTED fires for every route() call
+    # and is what register_handler()'s Event-Bus subscriptions filter
+    # from. INTENT_FAILED fires for router-level failures (invalid
+    # non-string input to parse(), invalid non-Intent input to
+    # route()) and, separately, for isolated per-handler failures
+    # caught during register_handler()'s dispatch.
+    INTENT_PARSED = "intent_parsed"
+    INTENT_ROUTED = "intent_routed"
+    INTENT_FAILED = "intent_failed"

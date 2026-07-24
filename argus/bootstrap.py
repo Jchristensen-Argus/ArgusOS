@@ -8,8 +8,9 @@ Purpose:
     factory/packages/004_SERVICE_REGISTRY.md,
     factory/packages/005_SERVICE_LIFECYCLE.md,
     factory/packages/006_KNOWLEDGE_SERVICE.md,
-    factory/packages/007_MEMORY_SERVICE.md, and
-    factory/packages/008_SCHEDULER_SERVICE.md.
+    factory/packages/007_MEMORY_SERVICE.md,
+    factory/packages/008_SCHEDULER_SERVICE.md, and
+    factory/packages/009_INTENT_ROUTER.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -50,23 +51,37 @@ Startup Sequence:
        this package requires Scheduler to be started; tick() is never
        called automatically (v1 has no background thread), so there is
        no behavioral need to start it during bootstrap.
-    10. Register the eight core services (Configuration, Logger, Event
+    10. Construct the Intent Router (depends on the Event Bus) and
+        register it with the Container, per Package 009. Bootstrap is
+        the only place that constructs IntentRouter directly; every
+        other subsystem must resolve it from the Container. Like
+        Scheduler, IntentRouter implements IService but is registered
+        only (LifecycleState.REGISTERED) here - its own
+        initialize()/start() are deliberately NOT called by this
+        package, for the same divergence-avoidance reasoning recorded
+        in ADR-0002 and already applied to Scheduler in step 9.
+        IntentRouter is a second data point for that ADR: unlike
+        Scheduler's tick(), none of IntentRouter's parse()/route()/
+        register_handler() are gated by lifecycle state at all, so
+        bootstrap's abstention from starting it has no behavioral
+        consequence either way.
+    11. Register the nine core services (Configuration, Logger, Event
         Bus, Service Registry, Lifecycle Manager, Knowledge Service,
-        Memory Service, Scheduler) in the Service Registry
-        (identity/descriptive data only) and in the Lifecycle Manager,
-        where each enters LifecycleState.REGISTERED. None of them are
-        initialized or started by this package.
-    11. Construct and start the Application.
+        Memory Service, Scheduler, Intent Router) in the Service
+        Registry (identity/descriptive data only) and in the Lifecycle
+        Manager, where each enters LifecycleState.REGISTERED. None of
+        them are initialized or started by this package.
+    12. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
     No engines (Atlas, Cortex, Hermes, Navigator, Sentinel) are
-    initialized here. Packages 003-008 register the Event Bus, Service
-    Registry, Lifecycle Manager, Knowledge Service, Memory Service, and
-    Scheduler respectively but do not change Application's lifecycle:
-    no lifecycle events are published, and no core service is
-    initialized or started, by this package (see the Package 005
-    engineering notes).
+    initialized here. Packages 003-009 register the Event Bus, Service
+    Registry, Lifecycle Manager, Knowledge Service, Memory Service,
+    Scheduler, and Intent Router respectively but do not change
+    Application's lifecycle: no lifecycle events are published, and no
+    core service is initialized or started, by this package (see the
+    Package 005 engineering notes).
 
 Architectural Revision (Package 005):
     ServiceDescriptor no longer carries a `state` field. Architecture
@@ -90,6 +105,7 @@ from argus.application import Application
 from argus.configuration import Configuration
 from argus.container import Container
 from argus.events import IEventBus, InMemoryEventBus
+from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, JSONKnowledgeStorage, KnowledgeService
 from argus.lifecycle import LifecycleManager
 from argus.logging_service import get_logger, initialize_logging
@@ -97,10 +113,10 @@ from argus.memory import IMemoryService, JSONMemoryStorage, MemoryService
 from argus.scheduler import IScheduler, Scheduler
 from argus.services import IServiceRegistry, InMemoryServiceRegistry, ServiceDescriptor
 
-# The ArgusOS release this package targets, per the Package 008 work
-# order header ("ArgusOS Version Target: v0.0.8"). Used as the version
+# The ArgusOS release this package targets, per the Package 009 work
+# order header ("ArgusOS Version Target: v0.0.9"). Used as the version
 # recorded on every core ServiceDescriptor registered during bootstrap.
-CORE_SERVICES_VERSION = "0.0.8"
+CORE_SERVICES_VERSION = "0.0.9"
 
 
 def bootstrap() -> Application:
@@ -138,6 +154,9 @@ def bootstrap() -> Application:
     scheduler = Scheduler(event_bus=event_bus)
     container.register("scheduler", scheduler)
 
+    intent_router = IntentRouter(event_bus=event_bus)
+    container.register("intent_router", intent_router)
+
     _register_core_services(
         service_registry=service_registry,
         lifecycle_manager=lifecycle_manager,
@@ -147,6 +166,7 @@ def bootstrap() -> Application:
         knowledge_service=knowledge_service,
         memory_service=memory_service,
         scheduler=scheduler,
+        intent_router=intent_router,
     )
 
     application = Application(container)
@@ -165,29 +185,30 @@ def _register_core_services(
     knowledge_service: IKnowledgeService,
     memory_service: IMemoryService,
     scheduler: IScheduler,
+    intent_router: IIntentRouter,
 ) -> None:
     """
     Register the kernel's own core services with the Service Registry
     and the Lifecycle Manager, per Package 005's Bootstrap Integration
     (as amended by the Package 005 architectural revision), Package
     006's "KnowledgeService becomes a Core Service" requirement, and
-    the equivalent requirement for the Memory Service (Package 007)
-    and Scheduler (Package 008).
+    the equivalent requirement for the Memory Service (Package 007),
+    Scheduler (Package 008), and the Intent Router (Package 009).
 
     Each of Configuration, the Logger, the Event Bus, the Service
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
-    Service, and Scheduler is recorded as a ServiceDescriptor (identity
-    and descriptive data only, no runtime state) in the Service
-    Registry, and as a LifecycleState.REGISTERED entry in the
-    Lifecycle Manager, which is the sole owner of runtime lifecycle
-    state for the Lifecycle Manager's own purposes. Neither
+    Service, Scheduler, and the Intent Router is recorded as a
+    ServiceDescriptor (identity and descriptive data only, no runtime
+    state) in the Service Registry, and as a LifecycleState.REGISTERED
+    entry in the Lifecycle Manager, which is the sole owner of runtime
+    lifecycle state for the Lifecycle Manager's own purposes. Neither
     initialize() nor start() is called on the Lifecycle Manager for
-    any of them here. Scheduler is the first of these eight classes
-    that actually implements IService (see ADR-0002), but this
-    function still does not call scheduler.initialize()/start()
-    directly either - see the Startup Sequence note in this module's
-    docstring for why exercising Scheduler's real IService lifecycle
-    during bootstrap was deliberately avoided.
+    any of them here. Scheduler and the Intent Router are the two
+    classes among these nine that actually implement IService (see
+    ADR-0002), but this function still does not call either one's
+    initialize()/start() directly - see the Startup Sequence note in
+    this module's docstring for why exercising their real IService
+    lifecycles during bootstrap was deliberately avoided.
 
     Parameters:
         service_registry: Where each core service is recorded as a
@@ -200,6 +221,7 @@ def _register_core_services(
         knowledge_service: The Knowledge Service instance.
         memory_service: The Memory Service instance.
         scheduler: The Scheduler instance.
+        intent_router: The Intent Router instance.
     """
     core_services = (
         ("configuration", configuration, type(configuration)),
@@ -210,6 +232,7 @@ def _register_core_services(
         ("knowledge_service", knowledge_service, IKnowledgeService),
         ("memory_service", memory_service, IMemoryService),
         ("scheduler", scheduler, IScheduler),
+        ("intent_router", intent_router, IIntentRouter),
     )
 
     for name, instance, interface in core_services:

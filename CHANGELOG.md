@@ -434,3 +434,34 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - No retry/backoff for failing callbacks: a failure publishes `TaskFailed` and, for recurring triggers, is simply rescheduled for its normal next occurrence.
 - `IntervalTrigger` is fixed-delay, not fixed-rate: a late `tick()` call causes subsequent fires to drift later rather than catching up to a grid.
 - Confirmed: Scheduler's own `IService` state and a `LifecycleManager`'s per-name tracking of the same registered name can diverge if one is updated without the other, exactly as ADR-0002 predicted.
+
+## Package 009 - Intent Router
+
+### Added
+
+- Added `argus/intent/` package (Package 009 - Intent Router):
+  - `intent.py` - `IntentType` (`QUESTION`/`COMMAND`/`MEMORY`/`SCHEDULE`/`UNKNOWN`) and `Intent`, an immutable dataclass (`id`, `name`, `confidence`, `entities`, `parameters`, `timestamp`).
+  - `parser.py` - `parse_text(text) -> ParsedText`: pure, dependency-free, rule-based classification (fixed keyword lists, fixed precedence order: question mark/word, then command verb, then memory keyword, then schedule keyword, then unknown). No AI, no machine learning, no regex.
+  - `interfaces.py` - `IIntentRouter`, inheriting `IService` (`parse`, `route`, `register_handler`, plus the inherited `initialize`/`start`/`stop`/`status`).
+  - `router.py` - `IntentRouter`: `parse()` classifies text and publishes `IntentParsed`; `route()` publishes `IntentRouted` as its *only* invocation mechanism (no direct service calls); `register_handler()` is sugar over `IEventBus.subscribe()` that filters by intent name, reconstructs the routed `Intent`, and isolates handler failures (publishing `IntentFailed` instead of propagating).
+  - `exceptions.py` - `IntentError`, `IntentParseError`, `InvalidIntentError`, `DuplicateHandlerError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/009_INTENT_ROUTER.md`, including a note that no `design/specifications/INTENT_ROUTER.md` exists (this package implements the Founder's explicit work order directly, the same situation as Package 002).
+- Extended `argus/events/event_types.py`'s `EventType` with three new members: `INTENT_PARSED`, `INTENT_ROUTED`, `INTENT_FAILED`.
+- Added `tests/test_intent.py` (10 new tests), `tests/test_intent_parser.py` (28 new tests), `tests/test_intent_router.py` (33 new tests).
+- Extended `tests/test_bootstrap.py` with a test confirming the Intent Router resolves from the Container (1 new test).
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `IntentRouter` (depends on the Event Bus) immediately after Scheduler, and registers it in the Container as `"intent_router"`. Bootstrap order is now ... -> Scheduler -> Intent Router -> Register Core Services -> Application. `_register_core_services` now registers nine core services; `CORE_SERVICES_VERSION` bumped to `"0.0.9"`. IntentRouter's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same reasoning already applied to Scheduler in Package 008.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. IntentRouter is a second `IService` adopter, appended as a further empirical data point: unlike Scheduler's `tick()`, none of IntentRouter's `parse()`/`route()`/`register_handler()` are gated by lifecycle state at all - `IService` is satisfied here purely to meet an explicit interface requirement, with no genuine behavioral gate. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- `IntentRouter`'s `IService` implementation has no genuine behavioral gate: `parse()`/`route()`/`register_handler()` behave identically regardless of lifecycle state.
+- Classification is a fixed keyword/precedence scheme with no punctuation normalization: a keyword immediately followed by punctuation (e.g. `"note: buy milk"`) does not satisfy the word-boundary check and falls through to weak-confidence substring matching with no `subject` entity extracted.
+- No confidence levels beyond the three fixed constants (1.0 strong / 0.6 weak / 0.0 no-match).
+- `register_handler()`'s duplicate check is exact `(intent_name, handler)` identity; two distinct handler objects with identical behavior are not considered duplicates.

@@ -16,17 +16,19 @@
 - [x] Service Lifecycle Framework (IService, LifecycleManager, Package 005)
 - [x] Knowledge Service (KnowledgeRecord, IKnowledgeStorage/IKnowledgeService, JSONKnowledgeStorage, KnowledgeService, Package 006)
 - [x] Memory Service (MemoryRecord, IMemoryStorage/IMemoryService, JSONMemoryStorage, MemoryService, Package 007)
+- [x] Scheduler Service (ScheduledTask, Trigger/OneShotTrigger/IntervalTrigger/DailyTrigger, IScheduler(IService), Scheduler, Package 008)
+- [x] Intent Router (Intent/IntentType, parse_text, IIntentRouter(IService), IntentRouter, Package 009)
 
 ---
 
 ## Phase 2 — Core Engines
 
 - [x] Memory (short-term, expiry-aware working memory shipped as a Foundation-phase core service, Package 007; see Phase 1 above)
+- [x] Scheduler (tick()-driven, background-thread-free scheduling shipped as a Foundation-phase core service, Package 008; see Phase 1 above — this is not the full Navigator-integrated engine design/specifications/SCHEDULER.md describes, since Navigator does not exist yet, see factory/packages/008_SCHEDULER_SERVICE.md's Scope Reduction)
 - [ ] Atlas (blocked on: none currently — Memory Service, its one Required Dependency, now exists)
 - [ ] Cortex (blocked on: no specification file exists yet in design/specifications/)
 - [ ] Hermes (blocked on: Cortex)
-- [ ] Navigator (blocked on: Cortex, Hermes, Scheduler)
-- [ ] Scheduler (blocked on: Navigator — see design/specifications/SCHEDULER.md's Required Dependencies)
+- [ ] Navigator (blocked on: Cortex, Hermes; Scheduler's core-service form now exists, see Phase 1)
 - [ ] Sentinel (no blockers — Event Bus, Logging, Configuration all exist; not yet selected as a package, see factory/packages/007_MEMORY_SERVICE.md)
 
 ---

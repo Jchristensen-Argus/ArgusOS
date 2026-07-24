@@ -1,137 +1,154 @@
-# ArgusOS Implementation Report — Package 008: Scheduler Service
+# ArgusOS Implementation Report — Package 009: Intent Router
 
-## 1. Architecture Summary
+## 1. Package Overview
 
-Package 008 adds `argus/scheduler/`, ArgusOS's time-orchestration service. `Scheduler` maintains an in-memory registry of `ScheduledTask` objects and executes every due task only when `tick()` is called — no background thread, no timer, fully deterministic under an explicit `now`. Three `Trigger` implementations (`OneShotTrigger`, `IntervalTrigger`, `DailyTrigger`) compute "when is this next due" via a uniform contract, `next_fire_time(after) -> Optional[datetime]`, using strict `>` semantics throughout so no trigger ever double-fires. `IScheduler` inherits `IService`, making Scheduler the first class in the codebase to genuinely implement it — `start()`/`stop()` gate whether `tick()` is permitted to run at all, giving them real behavioral meaning without needing a thread. Every operation publishes a corresponding event on the existing Event Bus (`TaskScheduled`/`TaskStarted`/`TaskCompleted`/`TaskFailed`/`TaskCancelled`/`TaskPaused`/`TaskResumed`), plus the long-reserved `SCHEDULER_TICK` once per `tick()` call. Scheduler is registered as ArgusOS's eighth core service. All 196 pre-existing tests still pass; 85 new tests were added (281 total), all passing under `python -m unittest discover`. No pytest anywhere. `python main.py` starts and shuts down cleanly. Coverage is 100% on every new module except the abstract `Trigger.next_fire_time` stub (never reachable, same shape as every other ABC method stub in this codebase).
+Package 009 adds `argus/intent/`, ArgusOS's first deterministic text-classification and routing layer. `parse_text()` classifies raw text into one of five `IntentType` values (`QUESTION`/`COMMAND`/`MEMORY`/`SCHEDULE`/`UNKNOWN`) using fixed keyword lists and a fixed precedence order — no AI, no machine learning, no external libraries, no regex. `IntentRouter` wraps every classification in an immutable `Intent` value object, publishes `IntentParsed` on every `parse()` call (including `UNKNOWN` results), and publishes `IntentRouted` on every `route()` call as its *only* invocation mechanism — no service is ever called directly. `register_handler()` is implemented as filtered subscription sugar over the Event Bus, with per-handler failure isolation (a failing handler publishes `IntentFailed` rather than propagating or blocking other handlers). `IntentRouter` is registered as ArgusOS's ninth core service. All 281 pre-existing canonical tests still pass; 72 new tests were added (353 total in `tests/`), all passing under `python -m unittest discover -s tests`. No pytest anywhere in this package. `python main.py` starts and shuts down cleanly.
 
-## 2. Design Decisions
+## 2. Regeneration Note
 
-- **`callback` is a plain Python callable, not routed through Navigator.** `design/specifications/SCHEDULER.md` lists Navigator as a Required Dependency, but Navigator doesn't exist. Rather than invent its contract, v1 Scheduler invokes `ScheduledTask.callback()` directly. Documented as a scope reduction in `factory/packages/008_SCHEDULER_SERVICE.md`, to be revisited once Navigator exists.
-- **Strict `>` in every trigger's `next_fire_time`.** Using the same comparison operator uniformly (rather than mixing `>=`/`>` between "first computation" and "post-execution recomputation") is what makes `OneShotTrigger` naturally stop firing after its one execution, with no separate "has this already fired" flag needed.
-- **`IntervalTrigger` is fixed-delay, not fixed-rate.** Each next fire time is computed from the actual last check-in (`after`), not a fixed grid. Simpler, and immune to catch-up storms if `tick()` is called infrequently — a deliberate simplicity trade-off, not an oversight.
-- **`schedule()` and `resume()` both accept an optional `now`, matching `tick()`.** This was not in my original design and was added reactively after a real bug: without it, `schedule()`'s internal use of live wall-clock time made its own tests non-deterministic (see Section 9, "Deviations," for the full story). All three time-sensitive methods now share the same determinism guarantee.
-- **`cancel()` permanently removes a task; `pause()`/`resume()` only toggle `enabled`.** Distinct semantics: a cancelled task's ID can be reused; a paused one cannot be scheduled over.
-- **Priority execution order: `CRITICAL` → `HIGH` → `NORMAL` → `LOW`, ties broken by earliest `next_run`.** Fully deterministic given any set of simultaneously-due tasks — required by the "highly testable" instruction.
-- **A local `TaskPriority` enum, not `argus.events.EventPriority`.** Task priority and event priority are different concerns that happen to share a shape; reusing `EventPriority` would have coupled `argus.scheduler` to `argus.events`'s priority vocabulary for an unrelated reason.
-- **`IScheduler` inherits `IService`, and Scheduler is the first genuine adopter — deliberately, as the ADR-0002 proving ground.** See Section 3.
-- **Scheduler is registered in `bootstrap.py` but its `initialize()`/`start()` are never called there.** Nothing in this package calls `tick()` automatically, so starting it during bootstrap would have no behavioral effect while also being bootstrap's first exercise of the exact `IService`/`LifecycleManager` pairing ADR-0002 is watching for trouble in. The IService contract is instead proven correct through direct unit tests.
+This package was implemented twice. The first attempt was built against a reconstructed development workspace, not the Founder's live repository. When the Founder reported their live repository finished Package 008 with 369 passing tests against my reported 353 (281 baseline + 72 new), I stopped, requested the live repository directly, and compared every canonical file this package touches against it before writing anything further.
 
-## 3. IService Adoption and the ADR-0002 Finding
+The comparison found the discrepancy was not caused by any tests being removed. The Founder's live repository contains a stray, stale duplicate of parts of itself nested inside `argus/` — `argus/tests/` (4 files, 64 tests, frozen at a pre-Package-008 snapshot), `argus/lifecycle/test_lifecycle.py` (24 tests, an exact duplicate of `tests/test_lifecycle.py`), plus duplicate `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, and `argus/factory/` — left over from an earlier merge. A `.pytest_cache/` present in the repository confirmed the mechanism directly: its cached node-id list contains exactly 369 entries, matching 281 canonical + 24 + 64 duplicated. Every canonical file this package actually modifies (`argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`, `factory/ROADMAP.md`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) was verified byte-identical between the reconstructed workspace and the live repository by direct diff, so this package's actual implementation is unchanged between the two attempts — only this report and the delivery process reflect the correction.
 
-Per your standing instruction from the ADR-0002 discussion — leave `IService` unchanged, let the first real adopter be the proving ground, revisit only if confirmed — Scheduler implements `status()` exactly as the interface requires: a self-tracked internal `LifecycleState`, with no connection to whatever a `LifecycleManager` tracks for the same registered name.
+Per the Founder's explicit instruction, the stray duplicate and legacy pre-Factory files were left untouched as out of scope for this package, reserved for a dedicated future cleanup package. This package modifies only: `argus/` (adding `argus/intent/`, modifying `argus/bootstrap.py` and `argus/events/event_types.py`), `tests/`, `design/`, `factory/`, `CHANGELOG.md`, `DEVLOG.md`, and this file.
 
-**Finding: the duplication concern is confirmed empirically, not just theoretically.** `tests/test_scheduler.py::IServiceLifecycleDivergenceTests` registers a `Scheduler` with a real `LifecycleManager` the way `bootstrap.py` does, then calls `scheduler.initialize()`/`start()` directly (a realistic action — nothing in `IScheduler`'s contract discourages it). Result: `lifecycle_manager.status("scheduler")` still reports `REGISTERED` while `scheduler.status()` reports `RUNNING`. The two disagree, and nothing detects it.
+## 3. Architectural Rationale
 
-`bootstrap.py` itself avoids the problem by construction (it registers Scheduler but never calls its `initialize()`/`start()`), but that's a discipline maintained by convention, not enforced by the framework. This finding is appended to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` under "Empirical Finding (Package 008)". **ADR-0002's Status remains `Proposed`**, per your instruction — I did not change it. See Section 8 for the recommended next step.
+Unlike Packages 007 and 008, Package 009's scope was fully specified by the Founder's own work order rather than derived from a `design/specifications/` dependency audit — no `design/specifications/INTENT_ROUTER.md` exists in the repository (the same situation Package 002/Bootstrap was in). Every structural decision below therefore traces to an explicit line in that work order, not an invented architecture.
 
-## 4. Files Created
+The one genuine design problem the work order raised implicitly rather than explicitly: `register_handler(intent_name, handler)` is required as a first-class method, and separately, routing must go through "Intent → Event Bus → Interested services respond," with no direct service invocation. Read literally, these look like they could conflict — does `register_handler` provide a second, direct dispatch path alongside the Event Bus? Resolved by making `register_handler` pure sugar over `IEventBus.subscribe()`: it builds an adapter that subscribes to `IntentRouted`, filters by intent name, reconstructs the `Intent` from the event payload, and invokes the handler. `route()` itself has exactly one invocation mechanism — `self._event_bus.publish(...)` — and never touches a handler directly, at any point. This is verified structurally by two tests, not just asserted in a docstring: one confirms a handler registered *after* a `route()` call never fires (proving there's no lazy secondary dispatch), and another confirms a handler registered on an `IntentRouter` sharing no Event Bus with the router that called `route()` is never invoked (proving there's no direct call hiding behind the Event Bus abstraction).
 
-- `argus/scheduler/__init__.py`, `exceptions.py`, `interfaces.py`, `scheduler.py`, `task.py`, `triggers.py`
-- `factory/packages/008_SCHEDULER_SERVICE.md`
-- `tests/test_scheduler.py`, `tests/test_scheduler_task.py`, `tests/test_triggers.py`
+## 4. IService Adoption — A Second Data Point for ADR-0002
 
-## 5. Files Modified
+Per the Founder's standing instruction (leave `IService` unchanged, use real adopters as an empirical proving ground, keep ADR-0002 `Proposed`), `IntentRouter` is this package's second real `IService` implementer after Scheduler (Package 008). It confirms a different facet of the same concern.
 
-- `argus/bootstrap.py` — constructs and registers Scheduler as the eighth core service; `CORE_SERVICES_VERSION` bumped `"0.0.7"` → `"0.0.8"`.
-- `argus/events/event_types.py` — added seven `TASK_*` members; `SCHEDULER_TICK` (reserved since Package 003) is now used.
-- `tests/test_bootstrap.py` — extended to eight core services.
-- `CHANGELOG.md`, `DEVLOG.md` — Package 008 entries appended.
-- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` — empirical finding appended (Status left as `Proposed`).
+Scheduler showed two things at once: the duplicate-state risk is real, *and* `IService` can carry genuine behavior (`tick()` is gated on `RUNNING`). `IntentRouter` isolates the first finding from the second — it tracks its own `LifecycleState` the same way Scheduler does, to satisfy `status()`, but none of `parse()`, `route()`, or `register_handler()` are gated by that state at all. Calling `parse()` on a router that was never started behaves identically to calling it on one that has been started and stopped. `IService` is implemented here purely to satisfy the work order's explicit interface requirement, not because `IntentRouter` has any phased behavior for `start()`/`stop()` to enable or disable. This is documented directly in `router.py`'s module docstring and asserted by a dedicated test (`test_parse_route_and_register_handler_are_not_gated_by_lifecycle_state`), so that if a future revision *does* add gating, the change is forced to be deliberate and visible rather than an accidental regression.
 
-`ARCHITECTURE.md` was **not** modified — `IScheduler` inheriting `IService` was already anticipated by `IService`'s own Package 005 docstring, not a new architectural change. Separately, this work surfaced a real, pre-existing documentation-hygiene issue unrelated to Scheduler itself: this repository contains two unrelated `ARCHITECTURE.md`-adjacent documents. The top-level `ARCHITECTURE.md` describes an older, different pre-Factory project (`Shell`/`Commands`/`AI`/`Identity`/`Memory` components, versioned `v0.0.1` "The Spark" through `v0.0.9` "Intent Detection" in git history — an entirely separate version lineage from the Factory package numbering this session has built). `design/ARCHITECTURE.md`, which sits next to the real, authoritative `design/specifications/*.md` files, is an empty stub. I believe your stated Package list ("001 Identity, 002 Configuration...") traces back to the legacy top-level file, not the Factory history this session has been building and git-verifying (001 Foundation → 002 Bootstrap → 003 Event Bus → 004 Service Registry → 005 Service Lifecycle → 006 Knowledge Service → 007 Memory Service → 008 Scheduler Service, all with continuous commit history). I have not touched either file — this is flagged for your decision, not resolved unilaterally.
+This finding has been appended to ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) as a second empirical entry, not used to revise the ADR's own criterion or its `Proposed` status. See Section 9 (ADR Recommendation) below.
 
-## 6. Tests Added
-
-- `tests/test_triggers.py` — 18 tests: `OneShotTrigger` (future/exact/past `run_at`), `IntervalTrigger` (no-`start_at`, repeated advancement, future/past `start_at`, invalid interval), `DailyTrigger` (today/tomorrow rollover, boundary equality, default minute/second, out-of-range validation).
-- `tests/test_scheduler_task.py` — 10 tests: field storage, auto-generated `id`, uniqueness, defaults, immutability, `dataclasses.replace` behavior, `TaskPriority` membership.
-- `tests/test_scheduler.py` — 56 tests across: IService lifecycle (`initialize`/`start`/`stop`/`status`, illegal-transition guards, `tick()` gating), the empirical `IServiceLifecycleDivergenceTests` (ADR-0002 proof), `schedule()` (id generation, explicit id, duplicates, validation, event publication, explicit-`now` determinism), `cancel()`, `pause()`/`resume()` (including next_run recomputation), `tick()` (one-shot/interval/daily firing, non-refiring, `SCHEDULER_TICK` heartbeat), callback failures (isolated per-task, `TaskFailed` payload, still-rescheduled-on-failure), multiple simultaneous tasks (priority ordering, tie-breaking, partial-due sets), a self-cancelling-callback race-guard test, and `get_task`/`list_tasks` lookup semantics.
-- `tests/test_bootstrap.py` — 1 new test confirming Scheduler resolves from the Container.
-
-## 7. Integration Notes
-
-- `Scheduler(event_bus: IEventBus)` — constructed in `bootstrap.py` immediately after the Memory Service.
-- Registered in the Container as `"scheduler"`, in the Service Registry as a `ServiceDescriptor` (version `"0.0.8"`), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — consistent with all seven prior core services. Not initialized or started (see Section 2).
-- Fully backward compatible: no existing public interface, method signature, or stored data format was changed.
-- Scheduler has no dependency on `argus.knowledge` or `argus.memory`, directly or indirectly, per the explicit Non-Goal ("execution history should be made available through events so Memory can subscribe later").
-
-## 8. Merge Instructions
-
-1. Copy `argus/scheduler/` into the repository's `argus/` directory.
-2. Copy `factory/packages/008_SCHEDULER_SERVICE.md` into `factory/packages/`.
-3. Replace `argus/bootstrap.py`, `argus/events/event_types.py`, and `tests/test_bootstrap.py` with the versions in this delivery.
-4. Copy `tests/test_scheduler.py`, `tests/test_scheduler_task.py`, `tests/test_triggers.py` into `tests/`.
-5. Replace `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` with the version here (adds the empirical finding; Status field is unchanged, still `Proposed`).
-6. Append the Package 008 sections already included in the delivered `CHANGELOG.md`/`DEVLOG.md`, or replace the files outright — both are cumulative supersets through Package 007.
-7. Run `python -m unittest discover` — expect `Ran 281 tests ... OK`.
-8. Run `python main.py` — expect a clean start/shutdown log, exit code 0.
-9. Tag the result `v0.0.8`.
-
-**Recommended next step, not part of this merge:** open a dedicated architectural package to resolve `IService.status()`'s duplication, now that ADR-0002's concern is confirmed. Two options are already on record in the ADR: inject `LifecycleManager` + service name so `status()` can delegate, or drop `status()` from `IService` entirely and treat `LifecycleManager` as the sole source of truth everywhere. This is a recommendation for you to act on when ready — I have not implemented either.
-
-## 9. Expected Test Count After Merge
-
-**281 tests** (196 existing + 85 new).
-
-## 10. Deviations from the Work Order
-
-One real deviation, surfaced by a genuine bug rather than a design choice: the work order's requirements list `schedule()` without a `now` parameter. During test-writing, I found that `schedule()`'s internal use of live wall-clock time made it impossible to write deterministic tests — the sandbox's real clock (mid-2026) differs from any fixed test fixture date, so a task scheduled with a fixed `OneShotTrigger(run_at=...)` and a real "now" at schedule time behaved unpredictably. I added an optional `now` parameter to `schedule()` (and, for the same reason, to `resume()`), mirroring `tick()`'s existing pattern. This is additive and backward compatible — omitting `now` preserves the original behavior — but it is a signature addition beyond what the work order specified, made because "deterministic and highly testable" (an explicit requirement) was not achievable without it.
-
-## 11. Test Results
+## 5. Directory Tree (files touched)
 
 ```
-Ran 281 tests in 0.032s
+argus/
+    intent/
+        __init__.py
+        exceptions.py
+        intent.py
+        interfaces.py
+        parser.py
+        router.py
+    bootstrap.py                       (modified)
+    events/
+        event_types.py                 (modified)
+design/
+    decisions/
+        0002_ISERVICE_ADOPTION_CRITERION.md   (modified — appended finding)
+factory/
+    packages/
+        009_INTENT_ROUTER.md           (new)
+    ROADMAP.md                          (modified)
+tests/
+    test_bootstrap.py                   (modified)
+    test_intent.py                      (new)
+    test_intent_parser.py               (new)
+    test_intent_router.py               (new)
+CHANGELOG.md                            (modified)
+DEVLOG.md                               (modified)
+IMPLEMENTATION_REPORT.md                (replaced — this file)
+```
+
+No file outside this list was created, deleted, moved, or modified. In particular, `argus/tests/`, `argus/lifecycle/test_lifecycle.py`, `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, `argus/factory/`, and every legacy pre-Factory file (`argus/ai.py`, `argus/brain.py`, `argus/commands.py`, `argus/conversation.py`, `argus/identity.py`, `argus/shell.py`, `argus/memory.py`) were left completely untouched, per the Founder's explicit instruction.
+
+## 6. Integration Notes
+
+- `IntentRouter(event_bus: IEventBus)` — constructed in `bootstrap.py` immediately after Scheduler, since it depends only on the Event Bus (already constructed by that point).
+- Registered in the Container as `"intent_router"`, in the Service Registry as a `ServiceDescriptor` (version `"0.0.9"`), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — exactly matching the treatment of all eight prior core services, including Scheduler. Not initialized or started (see Section 4).
+- `argus/events/event_types.py` extended with `INTENT_PARSED`, `INTENT_ROUTED`, `INTENT_FAILED` — no existing members reused.
+- Fully backward compatible: no existing public interface, method signature, or stored data format was changed. `CORE_SERVICES_VERSION` bumped `"0.0.8"` → `"0.0.9"`, matching the version-target convention established in every prior package.
+- Deliberately does **not** import or reference `argus.knowledge`, `argus.memory`, or `argus.scheduler` anywhere in `argus/intent/` — loose coupling is structural (verified by `test_router_module_does_not_import_other_core_services`, which inspects `router.py`'s own source), not just a stated intention.
+
+## 7. Test Results
+
+Canonical suite (`tests/` only, the scope this package modifies):
+```
+python -m unittest discover -s tests
+Ran 353 tests in 0.035s
 OK
 ```
 
+A bare `python -m unittest discover` from the repository root additionally picks up the pre-existing, out-of-scope duplicate at `argus/lifecycle/test_lifecycle.py` (24 tests, untouched by this package):
+```
+python -m unittest discover
+Ran 377 tests in 0.033s
+OK
+```
+This is expected, not a regression — see Section 2.
+
 `python main.py`:
 ```
-2026-07-24 11:06:56 [INFO] argus: ArgusOS application started.
-2026-07-24 11:06:56 [INFO] argus: ArgusOS application shutting down.
+2026-07-24 12:43:56 [INFO] argus: ArgusOS application started.
+2026-07-24 12:43:56 [INFO] argus: ArgusOS application shutting down.
 ```
 Exit code 0.
 
-## 12. Coverage Summary
+## 8. Coverage Summary
+
+Measured with `coverage.py`, `python -m coverage run -m unittest discover -s tests`:
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/bootstrap.py` | 40 | 0 | 100% |
-| `argus/events/event_types.py` | 27 | 0 | 100% |
-| `argus/scheduler/__init__.py` | 6 | 0 | 100% |
-| `argus/scheduler/exceptions.py` | 5 | 0 | 100% |
-| `argus/scheduler/interfaces.py` | 21 | 0 | 100% |
-| `argus/scheduler/scheduler.py` | 128 | 0 | 100% |
-| `argus/scheduler/task.py` | 22 | 0 | 100% |
-| `argus/scheduler/triggers.py` | 42 | 1 | 98% (line 68 — the abstract `Trigger.next_fire_time` stub, unreachable) |
+| `argus/bootstrap.py` | 43 | 0 | 100% |
+| `argus/intent/__init__.py` | 6 | 0 | 100% |
+| `argus/intent/exceptions.py` | 4 | 0 | 100% |
+| `argus/intent/intent.py` | 23 | 0 | 100% |
+| `argus/intent/interfaces.py` | 11 | 0 | 100% |
+| `argus/intent/parser.py` | 53 | 0 | 100% |
+| `argus/intent/router.py` | 70 | 0 | 100% |
 
-Package 008 total: 291 statements, 99.7% covered. Full repository (`argus/*`): 958 statements, 97% covered.
+Package 009 total (`argus/intent/*`): 167 statements, 100% covered. Full `argus/*` coverage: 1,131 statements, 98% covered (24 missed, all pre-existing untested OS-failure branches / unreachable ABC stubs, none introduced by this package).
 
-## 13. Known Limitations
+## 9. Engineering Decisions / ADR Recommendation
 
-- No background thread; `tick()` must be driven externally (a future package's responsibility).
-- `callback` is a plain callable, not routed through Navigator (doesn't exist yet).
-- No retry/backoff for failed callbacks.
-- `IntervalTrigger` is fixed-delay; late ticks cause drift, not catch-up.
-- Confirmed (Section 3): Scheduler's own `IService` state can diverge from a `LifecycleManager`'s tracking of the same name if the two are updated out of lockstep.
+- **`register_handler` implemented as Event-Bus-subscription sugar, not a second dispatch path.** See Section 3.
+- **`IService` adopted per explicit instruction, honestly documented as ungated.** See Section 4. **ADR Recommendation:** unchanged from Package 008's finding — a dedicated architectural package is still warranted to resolve `IService.status()`'s duplication, and this package's finding additionally suggests that package should decide whether `IService` adoption ought to require a genuine behavioral gate as a precondition, not just a self-tracked state variable satisfying the interface.
+- **Exception base named `IntentError`**, matching the `<Subsystem>Error` naming convention already used for `SchedulerError`, `MemoryServiceError`, `KnowledgeError`.
+- **No punctuation normalization in `parser.py`.** A keyword immediately followed by punctuation (e.g. `"note: buy milk"`) does not satisfy the word-boundary check and falls through to weak-confidence substring matching with no `subject` entity extracted. Documented as a Known Limitation rather than fixed, since the work order's "simple rule-based parsing only" constraint does not call for punctuation handling.
 
-## 14. Repository-Derived Package Metrics (measured, not estimated)
+## 10. Deviations from the Work Order
 
-Measured via `git diff --stat/--numstat/--name-status HEAD~2 HEAD` (commits `82a4ef5` + `22ed03d` on top of `6129351`):
+None in implemented behavior. `argus/bootstrap.py`, `argus/events/event_types.py`, and `tests/test_bootstrap.py` were modified (not just added-to) to satisfy the work order's own explicit Bootstrap Integration and Events requirements — the same procedural pattern flagged in every prior package's report since Package 006. `factory/ROADMAP.md` was also updated to add checklist entries for both Intent Router (this package) and Scheduler (Package 008, whose ROADMAP.md update was confirmed absent from the live repository by direct diff) — a small, pre-existing documentation gap, fixed here rather than left inconsistent.
 
-- Files Created: 10 (6 `argus/scheduler/*.py`, `factory/packages/008_SCHEDULER_SERVICE.md`, 3 new test files)
-- Files Modified: 5 (`argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`) + 1 ADR appended (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`)
-- Lines Added: 1,893 (1,854 + 39 for the ADR append)
-- Lines Removed: 31
-- Unit Tests: 281 passing (85 new)
-- Coverage: 99.7% (Package 008 modules), 97% (full repository)
-- Public Classes: 6 (`ScheduledTask`, `TaskPriority`, `OneShotTrigger`, `IntervalTrigger`, `DailyTrigger`, `Scheduler`)
-- Public Interfaces: 2 (`IScheduler`, `Trigger`)
+## 11. Known Limitations
+
+- `IntentRouter`'s `IService` implementation has no genuine behavioral gate (see Section 4): `parse()`/`route()`/`register_handler()` behave identically regardless of lifecycle state.
+- No punctuation normalization in classification (see Section 9).
+- Confidence is limited to three fixed constants (1.0 strong / 0.6 weak / 0.0 no-match) — no finer-grained scoring.
+- `register_handler()`'s duplicate check is exact `(intent_name, handler)` object identity; two distinct callables with identical behavior both register successfully.
+- The repository's stray `argus/` duplicate tree and legacy pre-Factory files remain unresolved, out of scope for this package per the Founder's explicit instruction; reserved for a dedicated cleanup package. See Section 2.
+
+## 12. Repository-Derived Package Metrics (measured, not estimated)
+
+- Files Created: 10 (6 `argus/intent/*.py`, `factory/packages/009_INTENT_ROUTER.md`, 3 new test files)
+- Files Modified: 7 (`argus/bootstrap.py`, `argus/events/event_types.py`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, `factory/ROADMAP.md`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`)
+- Lines Added: 1,600 / Lines Removed: 32 (measured via `git diff --stat`, staged against the live repository's commit `bd30e29`)
+- Unit Tests: 353 passing in canonical `tests/` (72 new: 71 intent-specific + 1 bootstrap)
+- Coverage: 100% (Package 009 modules), 98% (full `argus/*`)
+- Public Classes: 3 (`Intent`, `ParsedText`, `IntentRouter`) plus 1 Enum (`IntentType`)
+- Public Interfaces: 1 (`IIntentRouter`)
 - New Dependencies: 0
 - External Libraries: 0 (standard library only)
-- Technical Debt: 5 items (see Known Limitations)
-- Architecture Deviations: 0 (the `now=` parameter addition is a signature extension, not an architecture deviation; the two-ARCHITECTURE.md finding is flagged, not an architecture change made by this package)
+- Architecture Deviations: 0
 
-## 15. ADR Recommendation
+## 13. Pre-Completion Checklist (per the Founder's explicit 7 points)
 
-**Open a dedicated architectural package to resolve `IService.status()`'s duplicate-state risk**, now confirmed empirically per Section 3. This was anticipated by ADR-0002 itself ("whichever service becomes ArgusOS's first genuine IService adopter should also resolve the interface gap this ADR identifies... not resolved by this ADR"). I have not implemented a fix — only confirmed the concern and left both previously-proposed options on record in the ADR for your decision. ADR-0002's Status remains `Proposed`.
+1. **Bootstrap registration verified** — `IntentRouter(event_bus=event_bus)` constructed in `bootstrap.py`, registered in the Container as `"intent_router"`. Confirmed via `test_bootstrap_registers_intent_router_in_container`.
+2. **Lifecycle registration verified** — registered in both the Service Registry (`ServiceDescriptor`, version `"0.0.9"`) and the Lifecycle Manager (`LifecycleState.REGISTERED`), alongside all eight prior core services. Confirmed via `test_bootstrap_registers_core_services_in_service_registry` and `test_core_services_report_registered_lifecycle_state`.
+3. **Service naming consistency verified** — registered as `"intent_router"`, confirmed against the live repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` (`"scheduler"`, `"memory_service"`, `"knowledge_service"`) before implementation, not assumed.
+4. **Both test suites addressed** — only `tests/` is canonical; `argus/tests/` is the confirmed stray duplicate described in Section 2 and was left untouched, not extended, per instruction.
+5. **All imports verified** — `python3 -m pyflakes` clean across every new and modified file in this live repository.
+6. **All regression tests verified passing** — `python -m unittest discover -s tests` reports `Ran 353 tests ... OK`; `python main.py` starts and shuts down cleanly with exit code 0.
+7. **Concise implementation summary** — see below.
 
-**Secondary, unrelated recommendation:** reconcile or formally retire the legacy top-level `ARCHITECTURE.md` (and its sibling root-level docs — `CHARTER.md`, `MISSION.md`, `decisions.md`/`DECISIONS.md`, `todo.md`/`TODO.md`), and populate the empty `design/ARCHITECTURE.md` stub, per Section 5. This predates Package 008 and is unrelated to Scheduler; flagged here only because implementing this package's "only update ARCHITECTURE.md if required" instruction required determining which file that even referred to.
+## 14. Concise Implementation Summary
+
+Package 009 adds `argus/intent/` to the Founder's live ArgusOS repository: a deterministic, keyword-based text classifier (`parse_text`) and an `IntentRouter` that wraps classifications in immutable `Intent` objects, routes exclusively through the Event Bus (`IntentParsed`/`IntentRouted`/`IntentFailed`), and offers `register_handler()` as pure Event-Bus-subscription sugar with per-handler failure isolation. `IIntentRouter` inherits `IService`, making `IntentRouter` a second real adopter alongside Scheduler; unlike Scheduler, none of its methods are gated by lifecycle state, a finding appended to ADR-0002 (kept `Proposed`, unchanged). Registered as ArgusOS's ninth core service, `REGISTERED`-only. This package was regenerated once after a test-count discrepancy was traced to a pre-existing, out-of-scope stray duplicate directory structure in the live repository (Section 2) — not to any defect in the implementation itself, which was verified byte-identical across both attempts for every canonical file touched. 353 tests pass in `tests/` (72 new), 100% coverage on every new module, `python main.py` starts and shuts down cleanly. Only canonical locations (`argus/`, `tests/`, `design/`, `factory/`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md`) were modified; all duplicate and legacy files were left untouched, per instruction.
