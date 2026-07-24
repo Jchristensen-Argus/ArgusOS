@@ -8,6 +8,7 @@ from argus.events import IEventBus, InMemoryEventBus
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
+from argus.scheduler import IScheduler, Scheduler
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
 
 CORE_SERVICE_NAMES = (
@@ -18,6 +19,7 @@ CORE_SERVICE_NAMES = (
     "lifecycle_manager",
     "knowledge_service",
     "memory_service",
+    "scheduler",
 )
 
 
@@ -91,6 +93,17 @@ class BootstrapTests(unittest.TestCase):
             memory_service = application.container.resolve("memory_service")
             self.assertIsInstance(memory_service, IMemoryService)
             self.assertIsInstance(memory_service, MemoryService)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_scheduler_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("scheduler"))
+            scheduler = application.container.resolve("scheduler")
+            self.assertIsInstance(scheduler, IScheduler)
+            self.assertIsInstance(scheduler, Scheduler)
         finally:
             application.shutdown()
 

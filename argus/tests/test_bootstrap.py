@@ -18,6 +18,7 @@ CORE_SERVICE_NAMES = (
     "lifecycle_manager",
     "knowledge_service",
     "memory_service",
+    "scheduler",
 )
 
 

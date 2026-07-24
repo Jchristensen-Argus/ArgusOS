@@ -402,3 +402,35 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Expired records are only removed from storage when `purge_expired()` is called explicitly; there is no background sweep. Until `purge_expired()` runs, expired-but-unpurged records still occupy space in `memory/memory_store.json` (though they are invisible to every read path).
 - `search()` is a simple case-insensitive substring match on `key`, not semantic search. Semantic search is explicitly listed as a Future Enhancement for Atlas, not Memory, in `design/specifications/ATLAS.md`.
 - Two OS-level failure branches in `JSONMemoryStorage.save` are not covered by unit tests, for the same reason noted for `JSONKnowledgeStorage` in the Package 006 entry above. Coverage for `argus/memory/storage.py` is 90%; every other new module is 100%.
+
+---
+
+### Added
+
+- Added `argus/scheduler/` package (Package 008 - Scheduler Service):
+  - `task.py` — `ScheduledTask`, an immutable dataclass (`id`, `name`, `callback`, `trigger`, `priority`, `enabled`, `created_at`, `next_run`, `last_run`), and `TaskPriority` (`LOW`/`NORMAL`/`HIGH`/`CRITICAL`, independent of `argus.events.EventPriority`).
+  - `triggers.py` — `Trigger` (the common contract: `next_fire_time(after) -> Optional[datetime]`, strict `>` semantics throughout), `OneShotTrigger`, `IntervalTrigger` (fixed-delay, not fixed-rate), `DailyTrigger`. No cron support, no time-zone conversion, no missed-schedule recovery — all explicitly deferred.
+  - `interfaces.py` — `IScheduler`, inheriting `IService` (`schedule`, `cancel`, `pause`, `resume`, `get_task`, `list_tasks`, `tick`, plus the inherited `initialize`/`start`/`stop`/`status`).
+  - `scheduler.py` — `Scheduler`: in-memory task registry, deterministic `tick()`-driven execution (no background thread), write-locked mutations, priority-then-next_run execution ordering, lazy one-shot exhaustion, and publishes a task lifecycle event for every operation plus `EventType.SCHEDULER_TICK` once per `tick()` call.
+  - `exceptions.py` — `SchedulerError`, `TaskAlreadyExists`, `TaskNotFound`, `InvalidTrigger`, `TaskExecutionError`.
+  - `__init__.py` — re-exports the package's public API.
+- Added `factory/packages/008_SCHEDULER_SERVICE.md`, including the scope reduction relative to `design/specifications/SCHEDULER.md` (no Navigator dependency; `callback` is a plain Python callable in v1) and the IService adoption rationale.
+- Extended `argus/events/event_types.py`'s `EventType` with seven new members: `TASK_SCHEDULED`, `TASK_STARTED`, `TASK_COMPLETED`, `TASK_FAILED`, `TASK_CANCELLED`, `TASK_PAUSED`, `TASK_RESUMED`. The existing `SCHEDULER_TICK` (reserved, unused since Package 003) is now used as a per-`tick()` heartbeat.
+- Added `tests/test_triggers.py` (18 new tests), `tests/test_scheduler_task.py` (10 new tests), `tests/test_scheduler.py` (55 new tests, including an empirical test proving the ADR-0002 duplicate-state concern is real, not just theoretical).
+- Extended `tests/test_bootstrap.py` with a test confirming the Scheduler resolves from the Container (1 new test).
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `Scheduler` (depends on the Event Bus) immediately after the Memory Service, and registers it in the Container as `"scheduler"`. Bootstrap order is now ... → Memory Service → Scheduler → Register Core Services → Application. `_register_core_services` now registers eight core services; `CORE_SERVICES_VERSION` bumped to `"0.0.8"`. Scheduler's own `initialize()`/`start()` are deliberately **not** called during bootstrap — see Engineering Decisions.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. Scheduler is its proving ground, per that ADR's own recommendation. Finding: **the predicted duplicate-state risk is confirmed empirically**, not just theoretical — see `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section and `tests/test_scheduler.py::IServiceLifecycleDivergenceTests` for the reproducing test.
+
+### Known Limitations
+
+- Scheduler has no background thread; nothing calls `tick()` automatically. A future package (or a direct caller) must drive `tick()` on its own schedule.
+- `ScheduledTask.callback` is a plain Python callable, not dispatched through Navigator (which does not exist yet).
+- No retry/backoff for failing callbacks: a failure publishes `TaskFailed` and, for recurring triggers, is simply rescheduled for its normal next occurrence.
+- `IntervalTrigger` is fixed-delay, not fixed-rate: a late `tick()` call causes subsequent fires to drift later rather than catching up to a grid.
+- Confirmed: Scheduler's own `IService` state and a `LifecycleManager`'s per-name tracking of the same registered name can diverge if one is updated without the other, exactly as ADR-0002 predicted.

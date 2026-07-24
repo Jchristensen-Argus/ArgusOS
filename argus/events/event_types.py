@@ -51,3 +51,18 @@ class EventType(Enum):
     KNOWLEDGE_CREATED = "knowledge_created"
     KNOWLEDGE_UPDATED = "knowledge_updated"
     KNOWLEDGE_DELETED = "knowledge_deleted"
+
+    # Added by Package 008 - Scheduler Service, per this module's own
+    # "single place new event types are added" scope note above.
+    # Scheduler publishes these on the existing Event Bus for every
+    # task lifecycle transition (see
+    # argus/scheduler/scheduler.py). SCHEDULER_TICK, reserved since
+    # Package 003 and unused until now, is published once per tick()
+    # call as a heartbeat, separate from the per-task events below.
+    TASK_SCHEDULED = "task_scheduled"
+    TASK_STARTED = "task_started"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+    TASK_CANCELLED = "task_cancelled"
+    TASK_PAUSED = "task_paused"
+    TASK_RESUMED = "task_resumed"
