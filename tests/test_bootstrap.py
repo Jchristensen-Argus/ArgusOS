@@ -5,7 +5,16 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
+from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
+
+CORE_SERVICE_NAMES = (
+    "configuration",
+    "logger",
+    "event_bus",
+    "service_registry",
+    "lifecycle_manager",
+)
 
 
 class BootstrapTests(unittest.TestCase):
@@ -46,6 +55,44 @@ class BootstrapTests(unittest.TestCase):
             service_registry = application.container.resolve("service_registry")
             self.assertIsInstance(service_registry, IServiceRegistry)
             self.assertIsInstance(service_registry, InMemoryServiceRegistry)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_lifecycle_manager_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("lifecycle_manager"))
+            lifecycle_manager = application.container.resolve("lifecycle_manager")
+            self.assertIsInstance(lifecycle_manager, LifecycleManager)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_core_services_in_service_registry(self):
+        application = bootstrap()
+
+        try:
+            service_registry = application.container.resolve("service_registry")
+            for name in CORE_SERVICE_NAMES:
+                self.assertTrue(
+                    service_registry.contains(name),
+                    msg=f"{name!r} was not registered in the Service Registry",
+                )
+            self.assertEqual(len(service_registry.list_services()), len(CORE_SERVICE_NAMES))
+        finally:
+            application.shutdown()
+
+    def test_core_services_report_registered_lifecycle_state(self):
+        application = bootstrap()
+
+        try:
+            lifecycle_manager = application.container.resolve("lifecycle_manager")
+            for name in CORE_SERVICE_NAMES:
+                self.assertEqual(
+                    lifecycle_manager.status(name),
+                    LifecycleState.REGISTERED,
+                    msg=f"{name!r} was not LifecycleState.REGISTERED",
+                )
         finally:
             application.shutdown()
 

@@ -73,3 +73,31 @@ A few decisions worth flagging:
 Registered `InMemoryServiceRegistry` in the Container from `bootstrap.py` only, in the exact position specified (between Event Bus and Application). Did not populate the registry with the existing services (Configuration, Logger, Event Bus) — the spec's Bootstrap Integration section asks for registering the Service Registry itself, not for using it yet.
 
 72 tests total (48 from Packages 002/003 plus 24 new), all passing under `python -m unittest discover`, no pytest anywhere.
+
+---
+
+## Package 005 – Service Lifecycle
+
+Built the common lifecycle contract and state machine every ArgusOS service will eventually implement: `IService` (initialize/start/stop/status), `LifecycleState` (seven states), and `LifecycleManager`, an in-memory, per-name state machine with an explicit legal-transition graph.
+
+The one real gap in the spec: the "Suggested public API" lists five methods (register/initialize/start/stop/status), but the transition rules require a `FAILED` state reachable from "any active state," and none of those five methods can produce it — `initialize`/`start`/`stop` each move forward exactly one step in the happy path, and `status` is read-only. Added a sixth method, `fail(service_name)`, since there's no other way to satisfy an explicit requirement in the same document. Documented prominently rather than silently added, since it's the most consequential judgment call in this package.
+
+The other structural note: `stop()` has to cover two edges (`RUNNING`→`STOPPING`→`STOPPED`) in one call, since there's no separate method for the second edge. It's implemented as one validated transition into `STOPPING` immediately followed by a direct write to `STOPPED` — no timers, no background step, matching "no timers, no background workers."
+
+Registered the five core services (Configuration, Logger, Event Bus, Service Registry, Lifecycle Manager) into both the Service Registry (finally closing the gap Package 004 flagged as a known limitation) and the Lifecycle Manager, all landing on `REGISTERED` and nothing further, exactly as instructed. Used `"0.0.5"` as the version on their `ServiceDescriptor`s, taken from this work order's own version target header.
+
+Flagged one open architecture question rather than resolving it myself: `ServiceDescriptor.state` (Package 004) and `LifecycleManager`'s `LifecycleState` (Package 005) are now two parallel, unsynchronized "state" concepts tracking the same five names. Not this package's job to unify them, but worth the Architect's attention before more services start relying on either one.
+
+99 tests total (72 from Packages 002-004 plus 27 new), all passing under `python -m unittest discover`, no pytest anywhere.
+
+---
+
+## Package 005 – Architectural Revision (duplicate state elimination)
+
+Architecture review caught exactly the thing flagged as a known limitation when Package 005 first shipped: `ServiceDescriptor.state` and the Lifecycle Manager's `LifecycleState` were two independent models of the same concept, set together but never kept in sync. Asked to make the Lifecycle Manager the sole owner and eliminate the duplicate before acceptance.
+
+Removed `state` from `ServiceDescriptor` and deleted `ServiceState` outright — searched the whole tree for it first to make sure nothing else depended on it (nothing did; only `service_descriptor.py`, `services/__init__.py`, and `bootstrap.py`'s construction call ever touched it). `ServiceDescriptor` is now pure identity/descriptive data: name, instance, interface, version, metadata. Runtime state lives in exactly one place now.
+
+This breaks `ServiceDescriptor`'s constructor signature. Didn't try to preserve backward compatibility with a stray optional `state` parameter that goes nowhere — the revision request was explicit that eliminating the duplicate takes priority, and the only callers were `bootstrap.py` and the test suite, both already fixed.
+
+Verified end to end: `python main.py` clean, all 99 tests passing, and a manual bootstrap check confirming no core service's `ServiceDescriptor` carries a `state` attribute while every core service still correctly reports `LifecycleState.REGISTERED` from the Lifecycle Manager.

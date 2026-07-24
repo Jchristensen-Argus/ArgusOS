@@ -309,3 +309,41 @@ Future systems:
 - The Service Registry does not auto-populate: Configuration, the Logger, the Event Bus, and the Service Registry itself are registered in the DI Container as before, but none of them are also registered as entries *inside* the Service Registry by this package. Bootstrap Integration in Package 004's spec calls for registering the Service Registry itself using the existing Container pattern, not for populating it; populating it is a natural follow-up once real service-oriented subsystems (Memory, Scheduler, Cortex, Atlas, Hermes) exist to register.
 - `ServiceDescriptor.state` has no default value (unlike `metadata`, which the spec explicitly defaults). Every caller must pass a `ServiceState` explicitly; the registry does not infer or transition it, per this package's non-goals (no automatic startup, no health monitoring, no event-driven lifecycle).
 - `InMemoryServiceRegistry` takes no logger and publishes no events. Unlike the Event Bus (Package 003), Package 004's specification does not include a Logging section, so no logging dependency was added.
+
+---
+
+### Added
+
+- Added `argus/lifecycle/` package (Package 005 - Service Lifecycle):
+  - `lifecycle.py` — `LifecycleState` enum (`CREATED`, `REGISTERED`, `INITIALIZING`, `RUNNING`, `STOPPING`, `STOPPED`, `FAILED`) and `LifecycleManager`, an in-memory, name-keyed state machine that validates every transition and rejects illegal ones explicitly. `stop()` carries a service through `STOPPING` to `STOPPED` in a single call; a `fail()` method (see Engineering Decisions in the Package 005 report) carries any active state to `FAILED`.
+  - `interfaces.py` — `IService` abstract contract (`initialize`, `start`, `stop`, `status`), the common lifecycle interface future services (Memory, Scheduler, Cortex, Atlas, Hermes) will implement.
+  - `exceptions.py` — `LifecycleError`, `InvalidStateTransitionError` (subclass of `LifecycleError`).
+  - `__init__.py` — re-exports the package's public API.
+- Added `tests/test_lifecycle.py` (27 new tests).
+- Extended `tests/test_bootstrap.py` with tests confirming the Lifecycle Manager resolves from the Container, all five core services are registered in the Service Registry, and all five report `LifecycleState.REGISTERED`.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `LifecycleManager` and registers it in the Container as `"lifecycle_manager"`, immediately after the Service Registry. It then registers Configuration, the Logger, the Event Bus, the Service Registry, and the Lifecycle Manager itself as `ServiceDescriptor` entries (version `"0.0.5"`, `ServiceState.REGISTERED`) in the Service Registry, and by name in the Lifecycle Manager (`LifecycleState.REGISTERED`). None of them are initialized or started. Bootstrap order is now Container → Configuration → Logging → Event Bus → Service Registry → Lifecycle Manager → Register Core Services → Application. No other part of the startup sequence changed.
+
+### Known Limitations
+
+- No existing class (`Configuration`, the stdlib `Logger`, `InMemoryEventBus`, `InMemoryServiceRegistry`, `LifecycleManager`) implements `IService`. Package 005 defines the contract; retrofitting Packages 002-004's services onto it is future work.
+- Core services are registered but never initialized or started in this package, per the work order's explicit instruction. They remain in `REGISTERED` until a future package calls `lifecycle_manager.initialize(...)` / `.start(...)` for them.
+- `LifecycleManager` and `InMemoryServiceRegistry` now both track a notion of "state" for the same five service names — `ServiceDescriptor.state` (Package 004's coarse `ServiceState`: `REGISTERED`/`ACTIVE`/`STOPPED`) and `LifecycleManager`'s fine-grained `LifecycleState`. They are set together in `_register_core_services` but are otherwise two independent mechanisms with no synchronization; reconciling them (or deciding they should stay separate) is an open architectural question, not addressed by this package.
+
+---
+
+### Changed (Package 005 — Architectural Revision)
+
+Architecture review found that Package 005 introduced a duplicate, unsynchronized runtime state model: `ServiceDescriptor.state` (`ServiceState`, from Package 004) and the Lifecycle Manager's `LifecycleState` (Package 005) both tracked "state" for the same five core services, set together in `bootstrap.py` but never reconciled — flagged as a known limitation in the original Package 005 delivery. This revision eliminates the duplicate:
+
+- Removed the `state: ServiceState` field from `ServiceDescriptor` (`argus/services/service_descriptor.py`). `ServiceDescriptor` is now purely identity and descriptive data: `name`, `instance`, `interface`, `version`, `metadata`.
+- Removed the `ServiceState` enum entirely (`REGISTERED`/`ACTIVE`/`STOPPED`) — nothing else referenced it.
+- Removed `ServiceState` from `argus/services/__init__.py`'s exports.
+- `argus/bootstrap.py`'s `_register_core_services` no longer passes `state=` when constructing each core service's `ServiceDescriptor`; it still calls `lifecycle_manager.register(name)` for each, which remains the sole place runtime lifecycle state is recorded.
+- Updated `tests/test_service_descriptor.py` (removed the `ServiceState` membership test, added a test asserting `ServiceDescriptor` has no `state` attribute at all) and `tests/test_service_registry.py`'s descriptor-building helper (no longer passes `state=`).
+
+The Lifecycle Manager (`argus.lifecycle.LifecycleManager`) is now the sole owner of runtime lifecycle state for every service ArgusOS tracks. The Service Registry answers "what services exist and what do they look like"; the Lifecycle Manager answers "what state is this service in right now." This is a breaking change to `ServiceDescriptor`'s constructor (the `state` argument no longer exists); per the revision request, backward compatibility was not preserved here since eliminating the duplicate source of truth took priority, and the only callers were within this repository (`bootstrap.py` and the test suite), both updated.
+
+Test count is unchanged at 99 (one `ServiceState`-specific test removed, one state-absence test added).

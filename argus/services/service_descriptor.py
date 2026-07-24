@@ -1,47 +1,36 @@
 """
-ServiceDescriptor and ServiceState for the ArgusOS Service Registry.
+ServiceDescriptor for the ArgusOS Service Registry.
 
 Purpose:
     Represent everything the Service Registry knows about one
     registered service: its name, the running instance, the interface
-    it fulfills, its version, its lifecycle state, and free-form
-    metadata, per factory/packages/004_SERVICE_REGISTRY.md.
+    it fulfills, its version, and free-form metadata, per
+    factory/packages/004_SERVICE_REGISTRY.md.
 
 Responsibilities:
-    - Define ServiceState, the closed set of lifecycle states a
-      registered service may be recorded as.
     - Define ServiceDescriptor, an immutable record combining a
       service's identity and descriptive data.
 
 Non-Responsibilities:
     - ServiceDescriptor contains no business logic: it does not
-      register, resolve, validate itself, or transition its own
-      state. It also does not transition ServiceState automatically;
-      this package does not implement service health monitoring or
-      event-driven lifecycle (see factory/packages/004_SERVICE_REGISTRY.md
-      Non-Goals). All of that belongs to, or is deferred beyond, the
-      Service Registry.
+      register, resolve, or validate itself.
+    - ServiceDescriptor does not track runtime lifecycle state. That
+      was originally modeled here as a `state: ServiceState` field
+      (Package 004), but architecture review found this duplicated
+      the Lifecycle Manager's LifecycleState (Package 005) as a second,
+      unsynchronized source of truth for the same concept. Per the
+      Package 005 architectural revision, the Lifecycle Manager
+      (argus.lifecycle.LifecycleManager) is now the sole owner of
+      runtime lifecycle state; ServiceDescriptor is purely descriptive
+      data and never represents a point-in-time runtime state.
 
 Dependencies:
     None (standard library only).
 """
 
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from types import MappingProxyType
 from typing import Any, Mapping
-
-
-class ServiceState(Enum):
-    """The lifecycle state a service is recorded as by the Service
-    Registry. The registry does not transition a service's state on
-    its own (no automatic startup, no health monitoring); a state is
-    simply the value carried by the ServiceDescriptor at registration
-    time."""
-
-    REGISTERED = auto()
-    ACTIVE = auto()
-    STOPPED = auto()
 
 
 @dataclass(frozen=True)
@@ -56,8 +45,7 @@ class ServiceDescriptor:
         registration.
 
     Responsibilities:
-        - Store name, instance, interface, version, state, and
-          metadata.
+        - Store name, instance, interface, version, and metadata.
         - Default `metadata` to an immutable empty mapping, and make
           any caller-supplied metadata immutable too, so a holder of a
           ServiceDescriptor can never mutate registry-held state
@@ -71,7 +59,6 @@ class ServiceDescriptor:
     instance: Any
     interface: type
     version: str
-    state: ServiceState
     metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:

@@ -3,7 +3,7 @@
 import unittest
 from dataclasses import FrozenInstanceError
 
-from argus.services.service_descriptor import ServiceDescriptor, ServiceState
+from argus.services.service_descriptor import ServiceDescriptor
 
 
 class FakeInterface:
@@ -20,7 +20,6 @@ def _descriptor(**overrides):
         instance=FakeService(),
         interface=FakeInterface,
         version="1.0.0",
-        state=ServiceState.REGISTERED,
     )
     defaults.update(overrides)
     return ServiceDescriptor(**defaults)
@@ -35,7 +34,14 @@ class ServiceDescriptorTests(unittest.TestCase):
         self.assertIs(descriptor.instance, instance)
         self.assertIs(descriptor.interface, FakeInterface)
         self.assertEqual(descriptor.version, "1.0.0")
-        self.assertEqual(descriptor.state, ServiceState.REGISTERED)
+
+    def test_descriptor_does_not_carry_runtime_state(self):
+        # Package 005 architectural revision: ServiceDescriptor no
+        # longer owns runtime state. The Lifecycle Manager
+        # (argus.lifecycle.LifecycleManager) is the sole owner.
+        descriptor = _descriptor()
+
+        self.assertFalse(hasattr(descriptor, "state"))
 
     def test_metadata_defaults_to_empty_mapping(self):
         descriptor = _descriptor()
@@ -64,12 +70,6 @@ class ServiceDescriptorTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             descriptor.metadata["key"] = "value"
-
-    def test_service_state_has_expected_members(self):
-        self.assertEqual(
-            {member.name for member in ServiceState},
-            {"REGISTERED", "ACTIVE", "STOPPED"},
-        )
 
 
 if __name__ == "__main__":

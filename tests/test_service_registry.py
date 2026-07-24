@@ -3,7 +3,7 @@
 import unittest
 
 from argus.services.exceptions import ServiceNotFoundError, ServiceRegistrationError
-from argus.services.service_descriptor import ServiceDescriptor, ServiceState
+from argus.services.service_descriptor import ServiceDescriptor
 from argus.services.service_registry import InMemoryServiceRegistry
 
 
@@ -22,7 +22,6 @@ def _descriptor(name="fake_service", **overrides):
         instance=FakeService(),
         interface=FakeInterface,
         version="1.0.0",
-        state=ServiceState.REGISTERED,
     )
     defaults.update(overrides)
     return ServiceDescriptor(**defaults)
