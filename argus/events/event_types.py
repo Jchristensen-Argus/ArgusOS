@@ -42,3 +42,12 @@ class EventType(Enum):
     MEMORY_UPDATED = "memory_updated"
     SCHEDULER_TICK = "scheduler_tick"
     LOG_MESSAGE = "log_message"
+
+    # Added by Package 006 - Knowledge Service, per this module's own
+    # "single place new event types are added" scope note above.
+    # KnowledgeService publishes these on the existing Event Bus after
+    # each successful put / update / delete (see
+    # argus/knowledge/knowledge_service.py).
+    KNOWLEDGE_CREATED = "knowledge_created"
+    KNOWLEDGE_UPDATED = "knowledge_updated"
+    KNOWLEDGE_DELETED = "knowledge_deleted"

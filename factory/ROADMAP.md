@@ -12,7 +12,9 @@
 - [x] Event Bus
 - [x] Service Registry
 - [x] Dependency Injection
-- [x] Lifecycle
+- [x] Lifecycle (Application start/shutdown, Package 002)
+- [x] Service Lifecycle Framework (IService, LifecycleManager, Package 005)
+- [x] Knowledge Service (KnowledgeRecord, IKnowledgeStorage/IKnowledgeService, JSONKnowledgeStorage, KnowledgeService, Package 006)
 
 ---
 

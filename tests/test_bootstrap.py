@@ -5,6 +5,7 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
+from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
 
@@ -14,6 +15,7 @@ CORE_SERVICE_NAMES = (
     "event_bus",
     "service_registry",
     "lifecycle_manager",
+    "knowledge_service",
 )
 
 
@@ -65,6 +67,17 @@ class BootstrapTests(unittest.TestCase):
             self.assertTrue(application.container.has("lifecycle_manager"))
             lifecycle_manager = application.container.resolve("lifecycle_manager")
             self.assertIsInstance(lifecycle_manager, LifecycleManager)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_knowledge_service_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("knowledge_service"))
+            knowledge_service = application.container.resolve("knowledge_service")
+            self.assertIsInstance(knowledge_service, IKnowledgeService)
+            self.assertIsInstance(knowledge_service, KnowledgeService)
         finally:
             application.shutdown()
 

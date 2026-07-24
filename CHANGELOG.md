@@ -347,3 +347,30 @@ Architecture review found that Package 005 introduced a duplicate, unsynchronize
 The Lifecycle Manager (`argus.lifecycle.LifecycleManager`) is now the sole owner of runtime lifecycle state for every service ArgusOS tracks. The Service Registry answers "what services exist and what do they look like"; the Lifecycle Manager answers "what state is this service in right now." This is a breaking change to `ServiceDescriptor`'s constructor (the `state` argument no longer exists); per the revision request, backward compatibility was not preserved here since eliminating the duplicate source of truth took priority, and the only callers were within this repository (`bootstrap.py` and the test suite), both updated.
 
 Test count is unchanged at 99 (one `ServiceState`-specific test removed, one state-absence test added).
+
+---
+
+### Added
+
+- Added `argus/knowledge/` package (Package 006 - Knowledge Service):
+  - `knowledge_record.py` — `KnowledgeRecord`, an immutable dataclass (`id`, `category`, `key`, `value`, `created_at`, `updated_at`, `version`) representing one fact in ArgusOS's persistent knowledge store. `id`/`created_at`/`updated_at` auto-generate; `version` defaults to `1`.
+  - `interfaces.py` — `IKnowledgeStorage` (`list_categories`, `load`, `save`) and `IKnowledgeService` (`put`, `get`, `exists`, `delete`, `list`, `update`).
+  - `storage.py` — `JSONKnowledgeStorage`, storing each category as `knowledge/<category>.json` (a JSON array), with every write performed atomically (temp file + `os.replace`).
+  - `knowledge_service.py` — `KnowledgeService`, the CRUD orchestrator: loads every category into a single key-indexed in-memory map at construction, guards all writes (`put`/`update`/`delete`) with a `threading.Lock` (reads remain unlocked, per this package's v1 scope), and publishes a Knowledge event on the Event Bus after each successful write, once the lock is released.
+  - `exceptions.py` — `KnowledgeError`, `KnowledgeNotFoundError`, `DuplicateKnowledgeError`.
+  - `__init__.py` — re-exports the package's public API.
+- Added six seed category files: `knowledge/founder.json`, `knowledge/businesses.json`, `knowledge/architecture.json`, `knowledge/projects.json`, `knowledge/tasks.json`, `knowledge/conversations.json`, each initialized to `[]`.
+- Extended `argus/events/event_types.py`'s `EventType` enum with `KNOWLEDGE_CREATED`, `KNOWLEDGE_UPDATED`, `KNOWLEDGE_DELETED`, per that module's own "this module is the single place new event types are added" scope note (Package 003).
+- Added `tests/test_knowledge_record.py` (8 new tests), `tests/test_storage.py` (12 new tests), `tests/test_knowledge_service.py` (20 new tests, including two covering empty-key/empty-category validation).
+- Extended `tests/test_bootstrap.py` with a test confirming the Knowledge Service resolves from the Container, and updated the six-service assertions already covered by the existing registry/lifecycle tests (1 new test).
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `JSONKnowledgeStorage` and `KnowledgeService` (depends on the Event Bus) immediately after the Lifecycle Manager, and registers `KnowledgeService` in the Container as `"knowledge_service"`. Bootstrap order is now Container → Configuration → Logging → Event Bus → Service Registry → Lifecycle Manager → Knowledge Service → Register Core Services → Application. `_register_core_services` now registers six core services (added Knowledge Service) as `ServiceDescriptor` entries in the Service Registry and by name in the Lifecycle Manager (`LifecycleState.REGISTERED`); `CORE_SERVICES_VERSION` was bumped to `"0.0.6"`, this work order's version target.
+
+### Known Limitations
+
+- `KnowledgeService` does not implement `IService` and is not initialized or started by the Lifecycle Manager in this package — it is registered only, matching the treatment of all other core services to date.
+- `JSONKnowledgeStorage._persist_category` rebuilds and rewrites a category's entire JSON file on every write (`put`/`update`/`delete`), scanning the full in-memory index each time. O(n) in the number of records in that category; acceptable for this package's intentionally simple v1 scope, but will not scale to large per-category record counts without a future revision.
+- `KnowledgeRecord.value` is not deep-frozen: only the dataclass's own fields are immutable. If a caller stores a mutable object (e.g. a `dict`) as `value` and keeps a reference to it, mutating that object in place bypasses `KnowledgeService`'s write path entirely (no lock, no persistence, no event). Documented, not fixed, per this package's "intentionally simple" scope.
+- Two OS-level failure branches in `JSONKnowledgeStorage.save` (the `os.replace` failure path and the leftover-temp-file cleanup path) are not covered by unit tests, since triggering them requires mocking filesystem failures. Coverage for `argus/knowledge/storage.py` is 91%; every other new module is 100%.
