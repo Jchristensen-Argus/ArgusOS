@@ -262,3 +262,27 @@ Future systems:
 - Event Bus is not initialized in this package; out of scope for Package 002 - Bootstrap.
 - The legacy interactive Shell (`argus/shell.py` and related modules) is not invoked from `main.py` pending a future package that reintegrates it on top of this foundation.
 - `design/specifications/CORTEX.md` does not yet exist, though Cortex is referenced as one of the five core engines in `INTERFACES.md` and `IMPLEMENTATION_PLAN.md`. Logged as an architectural backlog item; not required for Bootstrap.
+
+---
+
+### Added
+
+- Added `argus/events/` package (Package 003 - Event Bus):
+  - `event_types.py` — `EventPriority` and `EventType` enumerations.
+  - `event.py` — immutable `Event` dataclass (auto-generated `id`/UTC `timestamp`, empty-mapping `payload`/`metadata` defaults, `payload`/`metadata` wrapped in `MappingProxyType` so handlers cannot mutate them).
+  - `interfaces.py` — `IEventBus` abstract contract (`publish`, `subscribe`, `unsubscribe`, `dispatch`) and the `EventHandler` type alias.
+  - `exceptions.py` — `EventValidationError`, `SubscriptionError`.
+  - `event_bus.py` — `InMemoryEventBus`, a synchronous publish/subscribe implementation preserving handler registration order and rejecting invalid events/handlers/duplicate subscriptions explicitly.
+  - `__init__.py` — re-exports the package's public API.
+- Added `tests/test_event.py` and `tests/test_event_bus.py` (27 new tests).
+- Extended `tests/test_bootstrap.py` with a test confirming the Event Bus resolves from the Container as both `IEventBus` and `InMemoryEventBus`.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `InMemoryEventBus` (injected with a namespaced logger) and registers it in the Container as `"event_bus"`, immediately after logging initializes. No other part of the startup sequence changed.
+
+### Known Limitations
+
+- The Event Bus is synchronous and in-process only, per Package 003's explicit non-goals (no asyncio, threads, queues, external brokers, persistence, replay, distributed messaging, priority scheduling, middleware, filtering, or network transport).
+- `Application.start()` / `Application.shutdown()` do not publish `SYSTEM_STARTED` / `SYSTEM_STOPPING` / `SYSTEM_STOPPED` events. Package 003's objectives call for registering the Event Bus in the DI container, not for wiring it into the existing lifecycle, and Package 002's lifecycle was explicitly preserved as-is. Recommended as a follow-up package.
+- `EventType` and `EventPriority` are both defined in `event_types.py` (the module list in the work order named one file for "types"); `event.py` imports both from there.

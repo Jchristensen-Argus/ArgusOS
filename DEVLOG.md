@@ -37,3 +37,19 @@ The coding standard was also consolidated: `CODING_STANDARDS.md` and `coding.md`
 Architecture review caught a real gap: the test suite booted fine in isolation but `python -m unittest` and `python -m unittest discover` found zero tests, and `pytest` wasn't installed in the review environment. Root cause: the tests were written as bare pytest-style functions (`pytest.raises`, the `tmp_path` fixture) with no `unittest.TestCase` classes, and `pytest` was never declared as a project dependency anywhere in the repo. `unittest`'s loader only collects test methods defined on `TestCase` subclasses, so it silently found nothing.
 
 Rewrote all five test files as `unittest.TestCase` classes using only the standard library (`tempfile.TemporaryDirectory` in place of `tmp_path`, `assertRaises` in place of `pytest.raises`), and added `tests/__init__.py`. Verified `python -m unittest`, `python -m unittest discover`, and `python -m unittest discover -s tests` all find and pass the full 21-test suite with no dependencies beyond the standard library, consistent with the coding standard's preference for the standard library over new dependencies.
+
+---
+
+## Package 003 – Event Bus
+
+Built the publish/subscribe communication backbone: an immutable `Event` (frozen dataclass, UUID + UTC timestamp auto-generated, payload/metadata wrapped in `MappingProxyType` so no handler can mutate what it receives), an `IEventBus` contract, and `InMemoryEventBus` — a synchronous, in-process implementation with explicit validation for null events, invalid types, missing sources, non-callable handlers, and duplicate subscriptions.
+
+A few judgment calls, all grounded directly in the spec text rather than invented:
+
+`publish()` validates the event, times the dispatch, and logs type/source/priority/handler-count/duration; `dispatch()` is the separate, unvalidated handler-invocation primitive the interface also requires. Splitting them this way is the only reading that doesn't make one of the two interface methods redundant.
+
+`EventPriority` defaults to `NORMAL` — implied by the acceptance scenario, which constructs an `Event` without a priority.
+
+Registered `InMemoryEventBus` in the Container from `bootstrap.py` only. Left `Application.start()`/`shutdown()` untouched — the work order's objectives call for DI registration, not for lifecycle wiring, and Package 002's lifecycle was explicitly marked "preserve exactly." Flagged as a natural next package rather than folded in here.
+
+All 21 Package 002 tests plus 27 new tests pass under `python -m unittest discover` — 48 total, no pytest anywhere.

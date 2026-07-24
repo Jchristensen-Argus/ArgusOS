@@ -4,6 +4,7 @@ import unittest
 
 from argus.application import Application
 from argus.bootstrap import bootstrap
+from argus.events import IEventBus, InMemoryEventBus
 
 
 class BootstrapTests(unittest.TestCase):
@@ -24,6 +25,17 @@ class BootstrapTests(unittest.TestCase):
         application.shutdown()
 
         self.assertFalse(application.is_running)
+
+    def test_bootstrap_registers_event_bus_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("event_bus"))
+            event_bus = application.container.resolve("event_bus")
+            self.assertIsInstance(event_bus, IEventBus)
+            self.assertIsInstance(event_bus, InMemoryEventBus)
+        finally:
+            application.shutdown()
 
 
 if __name__ == "__main__":
