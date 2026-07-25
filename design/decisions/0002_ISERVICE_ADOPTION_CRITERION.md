@@ -381,3 +381,52 @@ classification exercise applied to packages that already adopted
 `IService` regardless. This ADR's Status remains `Proposed`, per
 standing instruction; only the Founder/Architect elevates it to
 `Accepted` or opens the follow-up package.
+
+## Empirical Finding (Package 014 - Plugin Manager)
+
+`IPluginManager`, per the Founder's Package 014 work order, does NOT
+inherit `IService` - the second consecutive new core service,
+following Capability Registry (Package 013), to deliberately abstain
+from adopting it. `PluginManager` is a pure metadata-and-lifecycle
+CRUD store: `register`, `unregister`, `enable`, `disable`, `get`,
+`list_plugins`, `list_exported_capabilities`, and `contains` are all
+fully usable the instant the manager is constructed, with no
+background thread, no connection to open or close, and nothing for
+`start()`/`stop()` to meaningfully enable or disable - architecturally
+identical to Knowledge Service (006), Memory Service (007), and
+Capability Registry (013).
+
+`enable()`/`disable()` are worth calling out explicitly, since their
+names could be mistaken for lifecycle-phase behavior: they toggle the
+`enabled` flag on an individual, already-registered `Plugin` - a
+registry-style mutation of data the manager owns, exactly like
+`Scheduler.pause()`/`resume()` toggling an individual `ScheduledTask`'s
+state (Package 008) without implying anything about `Scheduler`'s own
+`IService` lifecycle. They are not gated by, and do not participate
+in, `PluginManager`'s own (nonexistent) lifecycle state. Version 1
+plugins are also not required to execute real business logic (per
+this package's own Objective), so there is no "active work" phase for
+`start()`/`stop()` to gate even in principle - a stronger case for
+non-adoption than Capability Registry's, which at least had no
+lifecycle-shaped method names to potentially confuse the question.
+
+This is now two consecutive new-service non-adoptions, both correctly
+predicted by the criterion during design rather than discovered after
+the fact. Nine core services now exist that do not implement
+`IService` (Configuration, the Logger, the Event Bus, the Service
+Registry, the Lifecycle Manager, Knowledge Service, Memory Service,
+Capability Registry, and now Plugin Manager), alongside five that do
+(Scheduler, IntentRouter, WorkflowEngine, ConversationManager, and
+IntentDispatcher - four of which are genuinely gated).
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted for the
+five existing adopters. Two consecutive non-adoptions strengthen the
+observation from Package 013's finding that the criterion is doing
+real design-time filtering work, and additionally show it correctly
+handling a case (`enable`/`disable`) where lifecycle-sounding method
+names could otherwise have prompted an unwarranted `IService` adoption
+by pattern-matching on naming alone rather than on actual phased
+behavior. This ADR's Status remains `Proposed`, per standing
+instruction; only the Founder/Architect elevates it to `Accepted` or
+opens the follow-up package.

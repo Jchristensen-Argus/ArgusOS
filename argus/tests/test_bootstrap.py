@@ -24,6 +24,7 @@ CORE_SERVICE_NAMES = (
     "conversation_manager",
     "capability_registry",
     "intent_dispatcher",
+    "plugin_manager",
 )
 
 

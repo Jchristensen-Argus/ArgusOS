@@ -160,3 +160,22 @@ class EventType(Enum):
     # (validation error, duplicate, or not-found) call.
     CAPABILITY_REGISTERED = "capability_registered"
     CAPABILITY_UNREGISTERED = "capability_unregistered"
+
+    # Added by Package 014 - Plugin Manager, per this module's own
+    # "single place new event types are added" scope note above.
+    # PluginManager publishes these on the existing Event Bus (see
+    # argus/plugins/manager.py), mirroring CapabilityRegistry's
+    # CAPABILITY_REGISTERED/CAPABILITY_UNREGISTERED precedent (Package
+    # 013) for a metadata CRUD store, extended with two more events
+    # for this package's two additional lifecycle operations.
+    # PLUGIN_REGISTERED fires once per successful register() call;
+    # PLUGIN_UNREGISTERED fires once per successful unregister() call.
+    # PLUGIN_ENABLED fires once per successful enable() call (even if
+    # the plugin was already enabled); PLUGIN_DISABLED fires once per
+    # successful disable() call (even if the plugin was already
+    # disabled). None of the four fire for a failed (validation
+    # error, duplicate, or not-found) call.
+    PLUGIN_REGISTERED = "plugin_registered"
+    PLUGIN_UNREGISTERED = "plugin_unregistered"
+    PLUGIN_ENABLED = "plugin_enabled"
+    PLUGIN_DISABLED = "plugin_disabled"

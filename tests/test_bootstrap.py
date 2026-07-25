@@ -12,6 +12,7 @@ from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
+from argus.plugins import IPluginManager, PluginManager
 from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
@@ -30,6 +31,7 @@ CORE_SERVICE_NAMES = (
     "conversation_manager",
     "capability_registry",
     "intent_dispatcher",
+    "plugin_manager",
 )
 
 
@@ -201,6 +203,43 @@ class BootstrapTests(unittest.TestCase):
                 )
                 self.assertTrue(capability.enabled)
                 self.assertIn(intent_type, capability.intent_types)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_plugin_manager_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("plugin_manager"))
+            plugin_manager = application.container.resolve("plugin_manager")
+            self.assertIsInstance(plugin_manager, IPluginManager)
+            self.assertIsInstance(plugin_manager, PluginManager)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_plugin_manager_has_builtin_plugin(self):
+        application = bootstrap()
+
+        try:
+            plugin_manager = application.container.resolve("plugin_manager")
+            plugins = plugin_manager.list_plugins()
+            self.assertEqual(len(plugins), 1)
+            self.assertTrue(plugins[0].enabled)
+            self.assertTrue(plugins[0].exported_capabilities)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_plugin_manager_exports_same_capabilities_as_registry(self):
+        application = bootstrap()
+
+        try:
+            capability_registry = application.container.resolve("capability_registry")
+            plugin_manager = application.container.resolve("plugin_manager")
+            registry_capabilities = capability_registry.list_capabilities()
+            exported_capabilities = plugin_manager.list_exported_capabilities()
+            self.assertEqual(set(c.id for c in registry_capabilities), set(c.id for c in exported_capabilities))
+            for capability in exported_capabilities:
+                self.assertIs(capability_registry.get(capability.id), capability)
         finally:
             application.shutdown()
 

@@ -600,3 +600,34 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `find_by_intent_type()` returns disabled capabilities too (a pure filter, by design) - callers other than `IntentDispatcher.resolve()` that query the registry directly must apply their own enabled-filtering if they need it.
 - Capabilities are held only in memory; nothing persists across process restarts.
 - Only `action_kind == "workflow"` is supported by `build_action_from_capability()` in Version 1; a capability with any other `action_kind` will fail at dispatch time with `ActionExecutionError` (`stage="build"`).
+
+## Package 014 - Plugin Manager
+
+### Added
+
+- Added `argus/plugins/` package (Package 014 - Plugin Manager):
+  - `plugin.py` - `Plugin`, an immutable dataclass describing one installable unit of extension: `name`, `version`, `author`, `description`, `id` (auto-generated), `enabled` (default `True`), `exported_capabilities` (a tuple of `Capability` instances), `metadata`. Pure data - holds no live service reference and does not validate its own fields.
+  - `interfaces.py` - `IPluginManager`, a plain `ABC` (deliberately NOT inheriting `IService` - see the ADR Update below): `register`, `unregister`, `enable`, `disable`, `get`, `list_plugins`, `list_exported_capabilities`, `contains`.
+  - `manager.py` - `PluginManager`: an in-memory registry of `Plugin` objects keyed by id. `register()` validates a Plugin's fields (non-empty id/name/version/author, and that every `exported_capabilities` entry is a `Capability`) before accepting it - the one piece of business logic this module contains besides the `enable()`/`disable()` flag-replace, and it is validation, not execution. Publishes `PluginRegistered`/`PluginUnregistered`/`PluginEnabled`/`PluginDisabled` on success only. `list_exported_capabilities()` aggregates every registered Plugin's `exported_capabilities` in registration order - a pure, no-policy read; never calls into the Capability Registry itself.
+  - `exceptions.py` - `PluginError`, `InvalidPluginError`, `DuplicatePluginError`, `PluginNotFoundError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/014_PLUGIN_MANAGER.md`, including a note that no `design/specifications/PLUGIN.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009, 010, 011, 012, and 013).
+- Extended `argus/events/event_types.py`'s `EventType` with four new members: `PLUGIN_REGISTERED`, `PLUGIN_UNREGISTERED`, `PLUGIN_ENABLED`, `PLUGIN_DISABLED`.
+- Added `tests/test_plugin.py` (19 new tests: the `Plugin` model), `tests/test_plugin_manager.py` (47 new tests: `PluginManager`).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Plugin Manager resolves from the Container, has one enabled built-in Plugin with non-empty exported capabilities, and that its exported capabilities are the identical objects (`assertIs`) already registered with the Capability Registry.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"plugin_manager"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `PluginManager` (depends on the Event Bus only) immediately after the Capability Registry, registers it in the Container as `"plugin_manager"`, and registers one built-in `Plugin` ("Core Workflows") whose `exported_capabilities` are the same five `Capability` instances already registered with the Capability Registry in the preceding step - the identical objects, not copies, so nothing is registered twice and dispatch behavior is unaffected. Bootstrap order is now ... -> Conversation Manager -> Capability Registry -> Plugin Manager -> Intent Dispatcher -> Register Core Services -> Application. `_register_core_services` now registers fourteen core services. `CORE_SERVICES_VERSION` remains `"0.1.3"` - unchanged by this package, per its own explicit Version Policy.
+- `argus/dispatcher/`, `argus/capability/`, and `argus/workflow/` are unchanged - the target architecture's "Action -> Plugin Manager -> Workflow" diagram positioning is not wired into the dispatch path in Version 1 (see `factory/packages/014_PLUGIN_MANAGER.md`'s Architectural Decisions).
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `PluginManager` is the second consecutive new *non*-adopter of `IService`, following Capability Registry (Package 013) - its `enable()`/`disable()` methods were explicitly considered and rejected as lifecycle-phase candidates, since they mutate an individual Plugin's flag rather than the manager's own runtime state. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- Plugin discovery is registration-only in Version 1: no filesystem/entry-point scanning, no dynamic import machinery. A caller must construct and register every `Plugin` explicitly.
+- Plugins do not execute anything - there is no `Plugin.activate()` and no relationship between a `Plugin` and any `Action`/`WorkflowAction` beyond the `exported_capabilities` data link.
+- `list_exported_capabilities()`'s Capabilities are not automatically registered with the Capability Registry - `PluginManager` only exposes them; a caller decides whether and how to register any of them.

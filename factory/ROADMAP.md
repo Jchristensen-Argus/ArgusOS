@@ -22,6 +22,7 @@
 - [x] Conversation Manager (ConversationSession/ConversationMessage, ConversationState, IConversationManager(IService), ConversationManager, Package 011)
 - [x] Intent Dispatcher (Action/WorkflowAction, IIntentDispatcher(IService), IntentDispatcher, Package 012; revised in Package 013 to resolve Capabilities instead of holding its own mapping)
 - [x] Capability Registry (Capability, ICapabilityRegistry, CapabilityRegistry, Package 013)
+- [x] Plugin Manager (Plugin, IPluginManager, PluginManager, Package 014)
 
 ---
 

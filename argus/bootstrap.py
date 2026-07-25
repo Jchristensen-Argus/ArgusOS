@@ -13,8 +13,9 @@ Purpose:
     factory/packages/009_INTENT_ROUTER.md,
     factory/packages/010_WORKFLOW_ENGINE.md,
     factory/packages/011_CONVERSATION_MANAGER.md,
-    factory/packages/012_INTENT_DISPATCHER.md, and
-    factory/packages/013_CAPABILITY_REGISTRY.md.
+    factory/packages/012_INTENT_DISPATCHER.md,
+    factory/packages/013_CAPABILITY_REGISTRY.md, and
+    factory/packages/014_PLUGIN_MANAGER.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -116,7 +117,29 @@ Startup Sequence:
         Memory Service, which is not a divergence-avoidance workaround
         here (there is no IService lifecycle to diverge from) but
         simply this service's natural, permanent state.
-    14. Construct the Intent Dispatcher (depends on the Event Bus and,
+    14. Construct the Plugin Manager (depends on the Event Bus) and
+        register it with the Container, per Package 014. Bootstrap is
+        the only place that constructs PluginManager directly; every
+        other subsystem must resolve it from the Container.
+        Immediately after construction, bootstrap.py registers one
+        built-in Plugin - "Core Workflows" - whose exported_capabilities
+        are the same five Capability instances already registered with
+        the Capability Registry in step 13 (the identical objects, not
+        copies), per this package's "Provide one or more built-in
+        plugins representing the existing workflow implementations"
+        requirement. This does not register anything a second time
+        with the Capability Registry - PluginManager.register() only
+        stores the Plugin and its capability references in
+        PluginManager's own table; it never calls
+        ICapabilityRegistry.register(). Unlike Scheduler, IntentRouter,
+        WorkflowEngine, ConversationManager, and IntentDispatcher,
+        PluginManager does NOT implement IService - see
+        argus/plugins/interfaces.py's Architectural Note and
+        ADR-0002's newly appended Empirical Finding for this package.
+        It is registered with the Lifecycle Manager as
+        LifecycleState.REGISTERED, exactly like Knowledge Service,
+        Memory Service, and CapabilityRegistry.
+    15. Construct the Intent Dispatcher (depends on the Event Bus and,
         as of Package 013, the Capability Registry) and register it
         with the Container, per Packages 012 and 013. Bootstrap is the
         only place that constructs IntentDispatcher directly; every
@@ -138,26 +161,27 @@ Startup Sequence:
         the dispatcher's own state to be RUNNING) but is registered
         only (LifecycleState.REGISTERED) here, for the same
         divergence-avoidance reasoning recorded in ADR-0002.
-    15. Register the thirteen core services (Configuration, Logger,
+    16. Register the fourteen core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
         Engine, Conversation Manager, Capability Registry, Intent
-        Dispatcher) in the Service Registry (identity/descriptive data
-        only) and in the Lifecycle Manager, where each enters
+        Dispatcher, Plugin Manager) in the Service Registry
+        (identity/descriptive data only) and in the Lifecycle Manager, where each enters
         LifecycleState.REGISTERED. None of them are initialized or
         started by this package.
-    16. Construct and start the Application.
+    17. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
     No engines (Atlas, Cortex, Hermes, Navigator, Sentinel) are
-    initialized here. Packages 003-013 register the Event Bus, Service
+    initialized here. Packages 003-014 register the Event Bus, Service
     Registry, Lifecycle Manager, Knowledge Service, Memory Service,
     Scheduler, Intent Router, Workflow Engine, Conversation Manager,
-    Capability Registry, and Intent Dispatcher respectively but do not
-    change Application's lifecycle: no lifecycle events are published,
-    and no core service is initialized or started, by this package
-    (see the Package 005 engineering notes).
+    Capability Registry, Intent Dispatcher, and Plugin Manager
+    respectively but do not change Application's lifecycle: no
+    lifecycle events are published, and no core service is initialized
+    or started, by this package (see the Package 005 engineering
+    notes).
 
 Architectural Revision (Package 005):
     ServiceDescriptor no longer carries a `state` field. Architecture
@@ -197,6 +221,7 @@ from argus.knowledge import IKnowledgeService, JSONKnowledgeStorage, KnowledgeSe
 from argus.lifecycle import LifecycleManager
 from argus.logging_service import get_logger, initialize_logging
 from argus.memory import IMemoryService, JSONMemoryStorage, MemoryService
+from argus.plugins import IPluginManager, Plugin, PluginManager
 from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry, ServiceDescriptor
@@ -283,6 +308,23 @@ def bootstrap() -> Application:
         )
     container.register("capability_registry", capability_registry)
 
+    plugin_manager = PluginManager(event_bus=event_bus)
+    plugin_manager.register(
+        Plugin(
+            name="Core Workflows",
+            version="1.0.0",
+            author="ArgusOS Core Team",
+            description=(
+                "Built-in plugin representing the five Version 1 "
+                "workflow-backed capabilities registered directly by "
+                "the Capability Registry population step above - the "
+                "same Capability instances, not copies."
+            ),
+            exported_capabilities=tuple(capability_registry.list_capabilities()),
+        )
+    )
+    container.register("plugin_manager", plugin_manager)
+
     intent_dispatcher = IntentDispatcher(
         event_bus=event_bus,
         capability_registry=capability_registry,
@@ -306,6 +348,7 @@ def bootstrap() -> Application:
         conversation_manager=conversation_manager,
         capability_registry=capability_registry,
         intent_dispatcher=intent_dispatcher,
+        plugin_manager=plugin_manager,
     )
 
     application = Application(container)
@@ -329,6 +372,7 @@ def _register_core_services(
     conversation_manager: IConversationManager,
     capability_registry: ICapabilityRegistry,
     intent_dispatcher: IIntentDispatcher,
+    plugin_manager: IPluginManager,
 ) -> None:
     """
     Register the kernel's own core services with the Service Registry
@@ -343,22 +387,24 @@ def _register_core_services(
     Each of Configuration, the Logger, the Event Bus, the Service
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
     Service, Scheduler, the Intent Router, the Workflow Engine, the
-    Conversation Manager, the Capability Registry, and the Intent
-    Dispatcher is recorded as a ServiceDescriptor (identity and
-    descriptive data only, no runtime state) in the Service Registry,
-    and as a LifecycleState.REGISTERED entry in the Lifecycle Manager,
-    which is the sole owner of runtime lifecycle state for the
-    Lifecycle Manager's own purposes. Neither initialize() nor start()
-    is called on the Lifecycle Manager for any of them here. Scheduler,
-    the Intent Router, the Workflow Engine, the Conversation Manager,
-    and the Intent Dispatcher are five of these thirteen that actually
-    implement IService (see ADR-0002); the Capability Registry
-    deliberately does not (see
-    argus/capability/interfaces.py's Architectural Note). This
-    function still does not call any IService adopter's
-    initialize()/start() directly - see the Startup Sequence note in
-    this module's docstring for why exercising their real IService
-    lifecycles during bootstrap was deliberately avoided.
+    Conversation Manager, the Capability Registry, the Intent
+    Dispatcher, and the Plugin Manager is recorded as a
+    ServiceDescriptor (identity and descriptive data only, no runtime
+    state) in the Service Registry, and as a LifecycleState.REGISTERED
+    entry in the Lifecycle Manager, which is the sole owner of runtime
+    lifecycle state for the Lifecycle Manager's own purposes. Neither
+    initialize() nor start() is called on the Lifecycle Manager for
+    any of them here. Scheduler, the Intent Router, the Workflow
+    Engine, the Conversation Manager, and the Intent Dispatcher are
+    five of these fourteen that actually implement IService (see
+    ADR-0002); the Capability Registry and the Plugin Manager
+    deliberately do not (see
+    argus/capability/interfaces.py's and argus/plugins/interfaces.py's
+    Architectural Notes). This function still does not call any
+    IService adopter's initialize()/start() directly - see the
+    Startup Sequence note in this module's docstring for why
+    exercising their real IService lifecycles during bootstrap was
+    deliberately avoided.
 
     Parameters:
         service_registry: Where each core service is recorded as a
@@ -376,6 +422,7 @@ def _register_core_services(
         conversation_manager: The Conversation Manager instance.
         capability_registry: The Capability Registry instance.
         intent_dispatcher: The Intent Dispatcher instance.
+        plugin_manager: The Plugin Manager instance.
     """
     core_services = (
         ("configuration", configuration, type(configuration)),
@@ -391,6 +438,7 @@ def _register_core_services(
         ("conversation_manager", conversation_manager, IConversationManager),
         ("capability_registry", capability_registry, ICapabilityRegistry),
         ("intent_dispatcher", intent_dispatcher, IIntentDispatcher),
+        ("plugin_manager", plugin_manager, IPluginManager),
     )
 
     for name, instance, interface in core_services:
