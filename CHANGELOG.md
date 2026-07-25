@@ -664,3 +664,35 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `validate_plan()` checks capability-id existence only - it does not check a matching Capability's `enabled` flag or whether it actually supports the Plan's originating Intent's `IntentType`.
 - The Planner is not wired to the Capability Registry/Dispatcher path in any direction beyond its one read-only check - nothing automatically creates a Plan from a resolved Intent, and nothing consumes a validated Plan to dispatch it.
 - Plans are held only in memory; nothing persists across process restarts.
+
+## Package 016 - Agent Runtime
+
+### Added
+
+- Added `argus/runtime/` package (Package 016 - Agent Runtime):
+  - `execution.py` - `ExecutionStatus` (an enum: `CREATED`, `RUNNING`, `PAUSED`, `FAILED`, `COMPLETED`, `CANCELLED`) and `Execution`, an immutable dataclass describing one run of one Plan: `plan_id`, `id` (auto-generated), `status` (default `CREATED`), `current_step` (default 0), `results` (keyed by PlanStep id), `started_at`/`completed_at`, `metadata`. Pure data - holds no live service reference and does not validate its own fields.
+  - `interfaces.py` - `IAgentRuntime(IService)`: `start_execution`, `pause_execution`, `resume_execution`, `cancel_execution`, `get_execution`, `list_executions`, plus the inherited IService contract. Unlike Capability Registry/Plugin Manager/Planner (three consecutive non-adopters), this package DOES inherit `IService` - see the ADR Update below.
+  - `runtime.py` - `AgentRuntime`: an in-memory registry of `Execution` objects keyed by id. `start_execution()`/`resume_execution()` are gated on the Runtime's own `RUNNING` state and dispatch a Plan's `PlanStep`s sequentially through the injected `IIntentDispatcher.dispatch()` - the only way any step is ever executed - stopping immediately on the first failure (no retries, no rollback). `pause_execution()`/`cancel_execution()`/`get_execution()`/`list_executions()` remain ungated registry operations. Constructs a synthetic `Intent` per step (reusing the Plan's own `originating_intent.name`) since `IIntentDispatcher.dispatch()` has no capability-id-specific entry point - see this package's Known Limitations. Publishes `ExecutionCreated`/`ExecutionStarted`/`StepStarted`/`StepCompleted` and exactly one of `ExecutionCompleted`/`ExecutionFailed` per run; `pause_execution()`/`cancel_execution()` publish nothing (no corresponding event was specified).
+  - `exceptions.py` - `AgentRuntimeError` (base, deliberately not named `RuntimeError` to avoid shadowing the Python built-in), `InvalidExecutionError`, `ExecutionNotFoundError`, `InvalidExecutionStateError`, `StepExecutionError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/016_AGENT_RUNTIME.md`, including a note that no `design/specifications/AGENT_RUNTIME.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-015).
+- Extended `argus/events/event_types.py`'s `EventType` with six new members: `EXECUTION_CREATED`, `EXECUTION_STARTED`, `STEP_STARTED`, `STEP_COMPLETED`, `EXECUTION_COMPLETED`, `EXECUTION_FAILED` - exactly the six this package's work order named, no more.
+- Added `tests/test_execution.py` (22 new tests: the `Execution`/`ExecutionStatus` model), `tests/test_runtime.py` (47 new tests: `AgentRuntime`, including reentrant pause/resume/cancel scenarios and a fake-dispatcher-based failure/no-retry suite).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Agent Runtime resolves from the Container, is registered but not started, and can execute a validated Plan end-to-end through the real Planner/Dispatcher stack (failing for the expected, already-documented reason that bootstrap never starts WorkflowEngine - not a wiring bug).
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"agent_runtime"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `AgentRuntime` (depends on the Event Bus, the Intent Dispatcher, and the Planner) immediately after the Planner, registers it in the Container as `"agent_runtime"`. Bootstrap order is now ... -> Intent Dispatcher -> Planner -> Agent Runtime -> Register Core Services -> Application. `_register_core_services` now registers sixteen core services. `CORE_SERVICES_VERSION` remains `"0.1.5"` - unchanged by this package, per its own explicit Version Policy. AgentRuntime's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/planner/` are all unchanged - AgentRuntime's only touchpoints are `IIntentDispatcher.dispatch()` and `IPlanner.get_plan()`, both existing, unmodified public methods.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `AgentRuntime` breaks the three-consecutive-non-adopter streak (013, 014, 015): `start_execution()`/`resume_execution()` are genuinely gated, architecturally identical to `WorkflowEngine.execute()`/`ConversationManager.receive()`/`IntentDispatcher.dispatch()`. Sixth adopter, fifth genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- Per-step `required_capability` targeting is not honored by Dispatcher resolution in Version 1 - every step of a Plan resolves to whatever Capability the Dispatcher would select for the Plan's originating `IntentType`, regardless of each step's own `required_capability` id.
+- `PlanStep.optional` has no effect on execution - a failed optional step still stops the entire run, per this package's unconditional Failure Rules.
+- No persistence, no concurrency, no retries, no rollback.
+- `pause_execution()`/`cancel_execution()` are only reachable on a `RUNNING` Execution via a reentrant call from within a dispatched step's own action - there is no out-of-band way to pause an in-progress `start_execution()` call, since Version 1 has no concurrency.

@@ -483,3 +483,53 @@ small, stable set of genuinely phased engines identified early
 This ADR's Status remains `Proposed`, per standing instruction; only
 the Founder/Architect elevates it to `Accepted` or opens the
 follow-up package.
+
+## Empirical Finding (Package 016 - Agent Runtime)
+
+`IAgentRuntime`, per the Founder's Package 016 work order, DOES inherit
+`IService` - breaking the three-consecutive-non-adopter streak set by
+Capability Registry (013), Plugin Manager (014), and Planner (015).
+`AgentRuntime.start_execution()` and `resume_execution()` - the only
+two methods that actually dispatch a PlanStep through the injected
+`IIntentDispatcher` - are genuinely gated on the Runtime's own
+lifecycle state being `RUNNING`, raising `InvalidExecutionStateError`
+otherwise. `pause_execution()`, `cancel_execution()`, `get_execution()`,
+and `list_executions()` remain ungated registry-style operations on
+individual Executions, exactly mirroring `Scheduler.pause()`/`resume()`'s
+(Package 008) and every metadata/reasoning registry's own lookup
+methods in this codebase - none of which are affected by the owning
+service's `IService` lifecycle.
+
+This package is architecturally distinct from the three immediately
+preceding non-adopters in a way the criterion itself predicts
+correctly: Capability Registry, Plugin Manager, and Planner are all
+metadata/reasoning stores with no "active work" phase even in
+principle, whereas `AgentRuntime`'s entire purpose - "The Runtime owns
+execution only" - is to perform genuine, effectful work
+(dispatching through the Dispatcher, which in turn may run a
+Workflow) that must not happen automatically at construction time and
+should not be callable before the Runtime is deliberately started.
+This is architecturally identical to `WorkflowEngine.execute()`
+(Package 010), `ConversationManager.receive()` (Package 011), and
+`IntentDispatcher.dispatch()` (Package 012) - all three genuinely
+gated for the same reason.
+
+Six adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, and now AgentRuntime), five of
+which are genuinely gated (all but IntentRouter). Ten core services
+exist that do not implement `IService` (Configuration, the Logger,
+the Event Bus, the Service Registry, the Lifecycle Manager, Knowledge
+Service, Memory Service, Capability Registry, Plugin Manager, and
+Planner).
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted, now for
+six adopters rather than five. This package's finding is the clearest
+demonstration yet that the criterion discriminates correctly in both
+directions: it does not merely rubber-stamp non-adoption by default,
+and it correctly identifies a new genuine adopter the moment a
+package's actual purpose (executing real, effectful work through an
+existing gated engine) calls for one - even immediately following
+three consecutive packages that did not qualify. This ADR's Status
+remains `Proposed`, per standing instruction; only the Founder/Architect
+elevates it to `Accepted` or opens the follow-up package.

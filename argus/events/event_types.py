@@ -202,3 +202,30 @@ class EventType(Enum):
     PLAN_CREATED = "plan_created"
     PLAN_UPDATED = "plan_updated"
     PLAN_VALIDATED = "plan_validated"
+
+    # Added by Package 016 - Agent Runtime, per this module's own
+    # "single place new event types are added" scope note above.
+    # AgentRuntime publishes these on the existing Event Bus (see
+    # argus/runtime/runtime.py). EXECUTION_CREATED fires once per
+    # start_execution() call, before any step is dispatched.
+    # EXECUTION_STARTED fires immediately after, once the Execution's
+    # status becomes RUNNING. STEP_STARTED/STEP_COMPLETED bracket each
+    # individual PlanStep's Dispatcher.dispatch() call, in order.
+    # EXECUTION_COMPLETED fires once every step has been dispatched
+    # successfully; EXECUTION_FAILED fires instead - and execution
+    # stops immediately, no further steps run - if a step's dispatch()
+    # call raises. EXECUTION_FAILED and EXECUTION_COMPLETED are
+    # mutually exclusive outcomes for a single run, the same way
+    # WORKFLOW_FAILED/WORKFLOW_COMPLETED are for WorkflowEngine.execute()
+    # (Package 010) and DISPATCH_FAILED/DISPATCH_COMPLETED are for
+    # IntentDispatcher.dispatch() (Package 012). No dedicated event
+    # exists for pause_execution()/resume_execution()/cancel_execution()
+    # - this package's own Events section names exactly these six event
+    # types; see factory/packages/016_AGENT_RUNTIME.md's Architectural
+    # Decisions for why none were added to fill that gap.
+    EXECUTION_CREATED = "execution_created"
+    EXECUTION_STARTED = "execution_started"
+    STEP_STARTED = "step_started"
+    STEP_COMPLETED = "step_completed"
+    EXECUTION_COMPLETED = "execution_completed"
+    EXECUTION_FAILED = "execution_failed"

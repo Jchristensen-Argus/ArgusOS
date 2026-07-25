@@ -24,6 +24,7 @@
 - [x] Capability Registry (Capability, ICapabilityRegistry, CapabilityRegistry, Package 013)
 - [x] Plugin Manager (Plugin, IPluginManager, PluginManager, Package 014)
 - [x] Planner (Plan, PlanStep, PlanStatus, IPlanner, Planner, Package 015)
+- [x] Agent Runtime (Execution, ExecutionStatus, IAgentRuntime, AgentRuntime, Package 016)
 
 ---
 

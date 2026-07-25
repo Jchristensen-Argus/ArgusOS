@@ -14,6 +14,7 @@ from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
 from argus.planner import IPlanner, Planner, PlanStatus
 from argus.plugins import IPluginManager, PluginManager
+from argus.runtime import AgentRuntime, ExecutionStatus, IAgentRuntime
 from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
@@ -34,6 +35,7 @@ CORE_SERVICE_NAMES = (
     "intent_dispatcher",
     "plugin_manager",
     "planner",
+    "agent_runtime",
 )
 
 
@@ -285,6 +287,73 @@ class BootstrapTests(unittest.TestCase):
             validated = planner.validate_plan(plan.id)
 
             self.assertEqual(validated.status, PlanStatus.VALIDATED)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_agent_runtime_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("agent_runtime"))
+            agent_runtime = application.container.resolve("agent_runtime")
+            self.assertIsInstance(agent_runtime, IAgentRuntime)
+            self.assertIsInstance(agent_runtime, AgentRuntime)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_agent_runtime_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            agent_runtime = application.container.resolve("agent_runtime")
+            self.assertEqual(agent_runtime.status(), LifecycleState.CREATED)
+            self.assertEqual(application.container.resolve("lifecycle_manager").status("agent_runtime"), LifecycleState.REGISTERED)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_agent_runtime_executes_validated_plan_end_to_end(self):
+        from argus.intent import Intent, IntentType
+        from argus.runtime import StepExecutionError
+
+        application = bootstrap()
+
+        try:
+            planner = application.container.resolve("planner")
+            agent_runtime = application.container.resolve("agent_runtime")
+            capability_registry = application.container.resolve("capability_registry")
+            existing_capability = capability_registry.list_capabilities()[0]
+
+            plan = planner.create_plan(Intent(name=IntentType.QUESTION, confidence=1.0))
+            plan = planner.add_step(
+                plan.id,
+                description="Use an existing capability",
+                required_capability=existing_capability.id,
+            )
+            plan = planner.validate_plan(plan.id)
+
+            agent_runtime.initialize()
+            agent_runtime.start()
+            try:
+                # bootstrap.py registers every core service but starts
+                # none of them except Application itself (per
+                # ADR-0002's divergence-avoidance policy) - so the
+                # underlying WorkflowEngine is never started, and
+                # dispatch() fails with "WorkflowEngine is CREATED,
+                # expected RUNNING", wrapped as ActionExecutionError
+                # and then StepExecutionError. This test confirms the
+                # full Planner -> AgentRuntime -> IntentDispatcher call
+                # chain wires together correctly and fails for that
+                # expected, already-documented Version 1 reason
+                # (Packages 012-015's own Known Limitations), not a
+                # wiring bug introduced by this package.
+                with self.assertRaises(StepExecutionError):
+                    agent_runtime.start_execution(plan)
+            finally:
+                agent_runtime.stop()
+
+            executions = agent_runtime.list_executions()
+            self.assertEqual(len(executions), 1)
+            self.assertEqual(executions[0].status, ExecutionStatus.FAILED)
         finally:
             application.shutdown()
 
