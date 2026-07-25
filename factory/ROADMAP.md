@@ -18,6 +18,7 @@
 - [x] Memory Service (MemoryRecord, IMemoryStorage/IMemoryService, JSONMemoryStorage, MemoryService, Package 007)
 - [x] Scheduler Service (ScheduledTask, Trigger/OneShotTrigger/IntervalTrigger/DailyTrigger, IScheduler(IService), Scheduler, Package 008)
 - [x] Intent Router (Intent/IntentType, parse_text, IIntentRouter(IService), IntentRouter, Package 009)
+- [x] Workflow Engine (Workflow/WorkflowStep, WorkflowState, IWorkflowEngine(IService), WorkflowEngine, Package 010)
 
 ---
 

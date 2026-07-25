@@ -1,42 +1,40 @@
-# ArgusOS Implementation Report — Package 009: Intent Router
+# ArgusOS Implementation Report — Package 010: Workflow Engine
 
 ## 1. Package Overview
 
-Package 009 adds `argus/intent/`, ArgusOS's first deterministic text-classification and routing layer. `parse_text()` classifies raw text into one of five `IntentType` values (`QUESTION`/`COMMAND`/`MEMORY`/`SCHEDULE`/`UNKNOWN`) using fixed keyword lists and a fixed precedence order — no AI, no machine learning, no external libraries, no regex. `IntentRouter` wraps every classification in an immutable `Intent` value object, publishes `IntentParsed` on every `parse()` call (including `UNKNOWN` results), and publishes `IntentRouted` on every `route()` call as its *only* invocation mechanism — no service is ever called directly. `register_handler()` is implemented as filtered subscription sugar over the Event Bus, with per-handler failure isolation (a failing handler publishes `IntentFailed` rather than propagating or blocking other handlers). `IntentRouter` is registered as ArgusOS's ninth core service. All 281 pre-existing canonical tests still pass; 72 new tests were added (353 total in `tests/`), all passing under `python -m unittest discover -s tests`. No pytest anywhere in this package. `python main.py` starts and shuts down cleanly.
+Package 010 adds `argus/workflow/`, ArgusOS's first multi-step, deterministic orchestration layer. `Workflow` and `WorkflowStep` are immutable value objects; `WorkflowEngine` maintains an in-memory registry of workflows and executes a `PENDING` workflow's steps strictly in registration order, threading each step's returned context into the next. A failing step publishes `WorkflowFailed`, marks the workflow `FAILED`, and stops execution without the exception propagating out of `execute()`. `IWorkflowEngine` inherits `IService`; `execute()` is genuinely gated on the engine's own lifecycle state being `RUNNING` (mirroring `Scheduler.tick()`), while `register_workflow()`/`cancel()`/`get_workflow()` remain ungated registry operations. `WorkflowEngine` is registered as ArgusOS's tenth core service. All 353 pre-existing canonical tests still pass; 63 new tests were added (416 total in `tests/`), all passing under `python -m unittest discover -s tests`. No pytest anywhere in this package. `python main.py` starts and shuts down cleanly.
 
-## 2. Regeneration Note
+## 2. Repository Verification Note
 
-This package was implemented twice. The first attempt was built against a reconstructed development workspace, not the Founder's live repository. When the Founder reported their live repository finished Package 008 with 369 passing tests against my reported 353 (281 baseline + 72 new), I stopped, requested the live repository directly, and compared every canonical file this package touches against it before writing anything further.
+This package was implemented against a repository the Founder explicitly designated as the only authoritative source, per the standing instruction to compare expectations against the uploaded repository before writing any code and to stop rather than guess if a discrepancy is found. An initial upload provided for this request was still at Package 008 (`bd30e29`, `CORE_SERVICES_VERSION == "0.0.8"`, no `argus/intent/`) despite the work order's premise that Package 009 was already released - this was caught by fresh extraction and direct inspection (not assumed from memory of prior sessions) and reported before any Package 010 code was written. A corrected upload was then provided and verified fresh: commit `6b2e298` ("Implement Package 009 Intent Router") on top of `bd30e29`, `argus/intent/` present, `CORE_SERVICES_VERSION == "0.0.9"`, 353 canonical tests passing. Every file that Package 009 touched was additionally diffed against the original Package 009 delivery and found byte-identical, confirming a clean, unmodified merge before Package 010 work began.
 
-The comparison found the discrepancy was not caused by any tests being removed. The Founder's live repository contains a stray, stale duplicate of parts of itself nested inside `argus/` — `argus/tests/` (4 files, 64 tests, frozen at a pre-Package-008 snapshot), `argus/lifecycle/test_lifecycle.py` (24 tests, an exact duplicate of `tests/test_lifecycle.py`), plus duplicate `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, and `argus/factory/` — left over from an earlier merge. A `.pytest_cache/` present in the repository confirmed the mechanism directly: its cached node-id list contains exactly 369 entries, matching 281 canonical + 24 + 64 duplicated. Every canonical file this package actually modifies (`argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`, `factory/ROADMAP.md`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) was verified byte-identical between the reconstructed workspace and the live repository by direct diff, so this package's actual implementation is unchanged between the two attempts — only this report and the delivery process reflect the correction.
+One incidental, out-of-scope observation from that verification, unrelated to Package 010: the repository's stray duplicate `argus/tests/test_bootstrap.py` (part of the pre-existing, untouched legacy/duplicate tree flagged during Package 009) picked up a 1-line addition (`"intent_router"` added to its own `CORE_SERVICE_NAMES`) sometime after Package 009's delivery. This package did not make that edit and does not touch that file; noted for the record only.
 
-Per the Founder's explicit instruction, the stray duplicate and legacy pre-Factory files were left untouched as out of scope for this package, reserved for a dedicated future cleanup package. This package modifies only: `argus/` (adding `argus/intent/`, modifying `argus/bootstrap.py` and `argus/events/event_types.py`), `tests/`, `design/`, `factory/`, `CHANGELOG.md`, `DEVLOG.md`, and this file.
+Per the Founder's mid-request instruction, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, or push was performed, and this package is not being reported as released or complete - final validation, commit, tagging, and release are the Founder's responsibility against the live repository.
 
 ## 3. Architectural Rationale
 
-Unlike Packages 007 and 008, Package 009's scope was fully specified by the Founder's own work order rather than derived from a `design/specifications/` dependency audit — no `design/specifications/INTENT_ROUTER.md` exists in the repository (the same situation Package 002/Bootstrap was in). Every structural decision below therefore traces to an explicit line in that work order, not an invented architecture.
+No `design/specifications/WORKFLOW.md` exists in the repository - the same situation as Packages 002 and 009. Every structural decision below traces to an explicit line in the Founder's work order, not an invented architecture.
 
-The one genuine design problem the work order raised implicitly rather than explicitly: `register_handler(intent_name, handler)` is required as a first-class method, and separately, routing must go through "Intent → Event Bus → Interested services respond," with no direct service invocation. Read literally, these look like they could conflict — does `register_handler` provide a second, direct dispatch path alongside the Event Bus? Resolved by making `register_handler` pure sugar over `IEventBus.subscribe()`: it builds an adapter that subscribes to `IntentRouted`, filters by intent name, reconstructs the `Intent` from the event payload, and invokes the handler. `route()` itself has exactly one invocation mechanism — `self._event_bus.publish(...)` — and never touches a handler directly, at any point. This is verified structurally by two tests, not just asserted in a docstring: one confirms a handler registered *after* a `route()` call never fires (proving there's no lazy secondary dispatch), and another confirms a handler registered on an `IntentRouter` sharing no Event Bus with the router that called `route()` is never invoked (proving there's no direct call hiding behind the Event Bus abstraction).
+The central design tension, stated almost verbatim in the work order itself: "The Workflow Engine coordinates multiple Argus services to complete a workflow" versus "The Workflow Engine must never directly invoke unrelated services outside its defined interfaces." Resolved the same way Package 009 resolved Intent Router's analogous tension, but via a different mechanism suited to synchronous orchestration rather than event-driven reaction: a `WorkflowStep`'s `action` is an opaque, plain callable (`StepAction = Callable[[Mapping[str, Any]], Mapping[str, Any]]`) that `WorkflowEngine` invokes without any knowledge of what it does. `engine.py` never imports `argus.knowledge`, `argus.memory`, `argus.scheduler`, or `argus.intent` - verified structurally, not just by convention, via a test that inspects the module's own source for those import strings. Coordinating "multiple Argus services" happens *inside* a step's action - constructed by whoever builds the `WorkflowStep` (e.g. resolving a service from the Container) - never inside the engine.
 
-## 4. IService Adoption — A Second Data Point for ADR-0002
+## 4. IService Adoption — A Third Data Point for ADR-0002
 
-Per the Founder's standing instruction (leave `IService` unchanged, use real adopters as an empirical proving ground, keep ADR-0002 `Proposed`), `IntentRouter` is this package's second real `IService` implementer after Scheduler (Package 008). It confirms a different facet of the same concern.
+`IWorkflowEngine` inherits `IService`, per the Founder's explicit instruction, making `WorkflowEngine` a third real adopter after Scheduler (Package 008) and IntentRouter (Package 009). This finding reinforces Scheduler's rather than IntentRouter's: `execute()` genuinely requires the engine's own `LifecycleState` to be `RUNNING`, raising `WorkflowError` otherwise - exactly mirroring `Scheduler.tick()`'s gating. `register_workflow()`, `cancel()`, and `get_workflow()` remain unaffected by lifecycle state, mirroring Scheduler's `schedule`/`cancel`/`pause`/`resume`.
 
-Scheduler showed two things at once: the duplicate-state risk is real, *and* `IService` can carry genuine behavior (`tick()` is gated on `RUNNING`). `IntentRouter` isolates the first finding from the second — it tracks its own `LifecycleState` the same way Scheduler does, to satisfy `status()`, but none of `parse()`, `route()`, or `register_handler()` are gated by that state at all. Calling `parse()` on a router that was never started behaves identically to calling it on one that has been started and stopped. `IService` is implemented here purely to satisfy the work order's explicit interface requirement, not because `IntentRouter` has any phased behavior for `start()`/`stop()` to enable or disable. This is documented directly in `router.py`'s module docstring and asserted by a dedicated test (`test_parse_route_and_register_handler_are_not_gated_by_lifecycle_state`), so that if a future revision *does* add gating, the change is forced to be deliberate and visible rather than an accidental regression.
-
-This finding has been appended to ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) as a second empirical entry, not used to revise the ADR's own criterion or its `Proposed` status. See Section 9 (ADR Recommendation) below.
+Across all three adopters to date: two (Scheduler, WorkflowEngine) use `IService` for a genuine behavioral gate on their single "do the actual work" method; one (IntentRouter) adopts it with no behavioral gate, purely to satisfy an explicit interface requirement. This continues to support the criterion originally proposed in ADR-0002 ("adopt `IService` only when `start()`/`stop()` would do real, distinct work") as a good discriminator. This finding has been appended to ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`); its Status remains `Proposed`, per standing instruction - this package adds evidence, it does not resolve the open question.
 
 ## 5. Directory Tree (files touched)
 
 ```
 argus/
-    intent/
+    workflow/
         __init__.py
         exceptions.py
-        intent.py
         interfaces.py
-        parser.py
-        router.py
+        state.py
+        workflow.py
+        engine.py
     bootstrap.py                       (modified)
     events/
         event_types.py                 (modified)
@@ -45,49 +43,39 @@ design/
         0002_ISERVICE_ADOPTION_CRITERION.md   (modified — appended finding)
 factory/
     packages/
-        009_INTENT_ROUTER.md           (new)
+        010_WORKFLOW_ENGINE.md         (new)
     ROADMAP.md                          (modified)
 tests/
     test_bootstrap.py                   (modified)
-    test_intent.py                      (new)
-    test_intent_parser.py               (new)
-    test_intent_router.py               (new)
+    test_workflow.py                    (new)
+    test_workflow_engine.py             (new)
 CHANGELOG.md                            (modified)
 DEVLOG.md                               (modified)
 IMPLEMENTATION_REPORT.md                (replaced — this file)
 ```
 
-No file outside this list was created, deleted, moved, or modified. In particular, `argus/tests/`, `argus/lifecycle/test_lifecycle.py`, `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, `argus/factory/`, and every legacy pre-Factory file (`argus/ai.py`, `argus/brain.py`, `argus/commands.py`, `argus/conversation.py`, `argus/identity.py`, `argus/shell.py`, `argus/memory.py`) were left completely untouched, per the Founder's explicit instruction.
+No file outside this list was created, deleted, moved, or modified. `argus/tests/`, `argus/lifecycle/test_lifecycle.py`, `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, `argus/factory/`, and every legacy pre-Factory file were left completely untouched, per the Founder's explicit repository rules.
 
 ## 6. Integration Notes
 
-- `IntentRouter(event_bus: IEventBus)` — constructed in `bootstrap.py` immediately after Scheduler, since it depends only on the Event Bus (already constructed by that point).
-- Registered in the Container as `"intent_router"`, in the Service Registry as a `ServiceDescriptor` (version `"0.0.9"`), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — exactly matching the treatment of all eight prior core services, including Scheduler. Not initialized or started (see Section 4).
-- `argus/events/event_types.py` extended with `INTENT_PARSED`, `INTENT_ROUTED`, `INTENT_FAILED` — no existing members reused.
-- Fully backward compatible: no existing public interface, method signature, or stored data format was changed. `CORE_SERVICES_VERSION` bumped `"0.0.8"` → `"0.0.9"`, matching the version-target convention established in every prior package.
-- Deliberately does **not** import or reference `argus.knowledge`, `argus.memory`, or `argus.scheduler` anywhere in `argus/intent/` — loose coupling is structural (verified by `test_router_module_does_not_import_other_core_services`, which inspects `router.py`'s own source), not just a stated intention.
+- `WorkflowEngine(event_bus: IEventBus)` — constructed in `bootstrap.py` immediately after the Intent Router, since it depends only on the Event Bus.
+- Registered in the Container as `"workflow_engine"`, in the Service Registry as a `ServiceDescriptor` (version `"0.0.10"`), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — matching the treatment of all nine prior core services. Not initialized or started by bootstrap; because `execute()` is genuinely gated (Section 4), a caller must call `engine.initialize()`/`start()` directly before `execute()` will do anything, exactly as Scheduler already requires for `tick()`.
+- `argus/events/event_types.py` extended with six new members: `WORKFLOW_STARTED`, `WORKFLOW_STEP_STARTED`, `WORKFLOW_STEP_COMPLETED`, `WORKFLOW_COMPLETED`, `WORKFLOW_FAILED`, `WORKFLOW_CANCELLED`.
+- Fully backward compatible: no existing public interface, method signature, or stored data format was changed. `CORE_SERVICES_VERSION` bumped `"0.0.9"` → `"0.0.10"`.
+- Naming (`"workflow_engine"`) verified against the live repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` convention before implementation (`"scheduler"`, `"intent_router"` — no `_service` suffix on the three newest entries), not assumed.
 
 ## 7. Test Results
 
-Canonical suite (`tests/` only, the scope this package modifies):
 ```
 python -m unittest discover -s tests
-Ran 353 tests in 0.035s
+Ran 416 tests in 0.037s
 OK
 ```
-
-A bare `python -m unittest discover` from the repository root additionally picks up the pre-existing, out-of-scope duplicate at `argus/lifecycle/test_lifecycle.py` (24 tests, untouched by this package):
-```
-python -m unittest discover
-Ran 377 tests in 0.033s
-OK
-```
-This is expected, not a regression — see Section 2.
 
 `python main.py`:
 ```
-2026-07-24 12:43:56 [INFO] argus: ArgusOS application started.
-2026-07-24 12:43:56 [INFO] argus: ArgusOS application shutting down.
+2026-07-25 10:12:59 [INFO] argus: ArgusOS application started.
+2026-07-25 10:12:59 [INFO] argus: ArgusOS application shutting down.
 ```
 Exit code 0.
 
@@ -97,58 +85,64 @@ Measured with `coverage.py`, `python -m coverage run -m unittest discover -s tes
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/bootstrap.py` | 43 | 0 | 100% |
-| `argus/intent/__init__.py` | 6 | 0 | 100% |
-| `argus/intent/exceptions.py` | 4 | 0 | 100% |
-| `argus/intent/intent.py` | 23 | 0 | 100% |
-| `argus/intent/interfaces.py` | 11 | 0 | 100% |
-| `argus/intent/parser.py` | 53 | 0 | 100% |
-| `argus/intent/router.py` | 70 | 0 | 100% |
+| `argus/bootstrap.py` | 46 | 0 | 100% |
+| `argus/workflow/__init__.py` | 6 | 0 | 100% |
+| `argus/workflow/engine.py` | 93 | 0 | 100% |
+| `argus/workflow/exceptions.py` | 5 | 0 | 100% |
+| `argus/workflow/interfaces.py` | 17 | 4 | 76% (lines 78, 105, 124, 135 — unreachable abstract-method stub bodies, same structural pattern as every other ABC in this codebase, e.g. `Trigger.next_fire_time`) |
+| `argus/workflow/state.py` | 7 | 0 | 100% |
+| `argus/workflow/workflow.py` | 24 | 0 | 100% |
 
-Package 009 total (`argus/intent/*`): 167 statements, 100% covered. Full `argus/*` coverage: 1,131 statements, 98% covered (24 missed, all pre-existing untested OS-failure branches / unreachable ABC stubs, none introduced by this package).
+Package 010 total (`argus/workflow/*`): 198 statements, 98% covered. Full `argus/*` coverage: 1,292 statements, 98% covered.
 
-## 9. Engineering Decisions / ADR Recommendation
+## 9. Engineering Decisions / Deviations from the Work Order
 
-- **`register_handler` implemented as Event-Bus-subscription sugar, not a second dispatch path.** See Section 3.
-- **`IService` adopted per explicit instruction, honestly documented as ungated.** See Section 4. **ADR Recommendation:** unchanged from Package 008's finding — a dedicated architectural package is still warranted to resolve `IService.status()`'s duplication, and this package's finding additionally suggests that package should decide whether `IService` adoption ought to require a genuine behavioral gate as a precondition, not just a self-tracked state variable satisfying the interface.
-- **Exception base named `IntentError`**, matching the `<Subsystem>Error` naming convention already used for `SchedulerError`, `MemoryServiceError`, `KnowledgeError`.
-- **No punctuation normalization in `parser.py`.** A keyword immediately followed by punctuation (e.g. `"note: buy milk"`) does not satisfy the word-boundary check and falls through to weak-confidence substring matching with no `subject` entity extracted. Documented as a Known Limitation rather than fixed, since the work order's "simple rule-based parsing only" constraint does not call for punctuation handling.
+- **`get_workflow(workflow_id) -> Workflow` added beyond the four literally-named Required Methods.** The work order lists `register_workflow`/`execute`/`cancel`/`status` as required, but also lists "Status reporting" as an expected test-coverage area; `IService.status()` reports only the *engine's* lifecycle state, with no way to query an individual workflow's `WorkflowState` otherwise. Added as a minimal, necessary lookup method, mirroring the precedent of Scheduler's `get_task()`/`list_tasks()` (Package 008) — though Scheduler's work order named those explicitly, so this addition is flagged more prominently as a judgment call, not a literal requirement.
+- **`execute()` genuinely gated on the engine's own `RUNNING` state; registry operations are not.** See Section 4.
+- **A failing step's exception is caught and never propagates out of `execute()`.** `WorkflowExecutionError` is constructed to wrap the original exception (for a documented, catchable type and message) but is never raised to the caller — `execute()` returns the accumulated context normally, and the workflow's own state (via `get_workflow`) is how a caller learns of failure. This mirrors `TaskExecutionError`'s role in Scheduler's `tick()` exactly.
+- **`cancel()` only succeeds against a `PENDING` workflow.** Because execution is fully synchronous with no threading, a workflow is never observably `RUNNING` to a caller outside of `execute()`'s own call stack — mid-execution cancellation is structurally impossible in this version, by design, per the work order's own "no threading, no background execution."
+- **Exception base named `WorkflowError`**, matching the `<Subsystem>Error` convention (`SchedulerError`, `IntentError`).
 
-## 10. Deviations from the Work Order
+## 10. Known Limitations
 
-None in implemented behavior. `argus/bootstrap.py`, `argus/events/event_types.py`, and `tests/test_bootstrap.py` were modified (not just added-to) to satisfy the work order's own explicit Bootstrap Integration and Events requirements — the same procedural pattern flagged in every prior package's report since Package 006. `factory/ROADMAP.md` was also updated to add checklist entries for both Intent Router (this package) and Scheduler (Package 008, whose ROADMAP.md update was confirmed absent from the live repository by direct diff) — a small, pre-existing documentation gap, fixed here rather than left inconsistent.
+- Steps execute strictly sequentially with no parallelism, branching, or conditional logic.
+- No retry/backoff for a failing step.
+- Workflows are held only in memory; nothing persists across process restarts.
+- A step's action has no declared input/output schema beyond "receives and returns a context mapping" — the engine validates only that it is callable.
+- The repository's stray `argus/` duplicate tree and legacy pre-Factory files remain unresolved, out of scope for this package per the Founder's explicit repository rules (Section 2).
 
-## 11. Known Limitations
+## 11. Repository-Derived Package Metrics (measured, not estimated)
 
-- `IntentRouter`'s `IService` implementation has no genuine behavioral gate (see Section 4): `parse()`/`route()`/`register_handler()` behave identically regardless of lifecycle state.
-- No punctuation normalization in classification (see Section 9).
-- Confidence is limited to three fixed constants (1.0 strong / 0.6 weak / 0.0 no-match) — no finer-grained scoring.
-- `register_handler()`'s duplicate check is exact `(intent_name, handler)` object identity; two distinct callables with identical behavior both register successfully.
-- The repository's stray `argus/` duplicate tree and legacy pre-Factory files remain unresolved, out of scope for this package per the Founder's explicit instruction; reserved for a dedicated cleanup package. See Section 2.
+Measured via `git diff --stat` against the working tree's unmodified base commit `6b2e298` (no commit was made — see Section 2):
 
-## 12. Repository-Derived Package Metrics (measured, not estimated)
-
-- Files Created: 10 (6 `argus/intent/*.py`, `factory/packages/009_INTENT_ROUTER.md`, 3 new test files)
-- Files Modified: 7 (`argus/bootstrap.py`, `argus/events/event_types.py`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, `factory/ROADMAP.md`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`)
-- Lines Added: 1,600 / Lines Removed: 32 (measured via `git diff --stat`, staged against the live repository's commit `bd30e29`)
-- Unit Tests: 353 passing in canonical `tests/` (72 new: 71 intent-specific + 1 bootstrap)
-- Coverage: 100% (Package 009 modules), 98% (full `argus/*`)
-- Public Classes: 3 (`Intent`, `ParsedText`, `IntentRouter`) plus 1 Enum (`IntentType`)
-- Public Interfaces: 1 (`IIntentRouter`)
+- Files Created: 9 (6 `argus/workflow/*.py`, `factory/packages/010_WORKFLOW_ENGINE.md`, 2 new test files)
+- Files Modified: 8 (`argus/bootstrap.py`, `argus/events/event_types.py`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, `factory/ROADMAP.md`, `tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md`)
+- Lines Added: 1,611 / Lines Removed: 30
+- Unit Tests: 416 passing in canonical `tests/` (63 new: 14 model + 48 engine + 1 bootstrap)
+- Coverage: 98% (Package 010 modules), 98% (full `argus/*`)
+- Public Classes: 3 (`Workflow`, `WorkflowStep`, `WorkflowEngine`) plus 1 Enum (`WorkflowState`)
+- Public Interfaces: 1 (`IWorkflowEngine`)
 - New Dependencies: 0
 - External Libraries: 0 (standard library only)
-- Architecture Deviations: 0
+- Architecture Deviations: 0 (the `get_workflow()` addition is documented in Section 9, not a deviation from architecture)
 
-## 13. Pre-Completion Checklist (per the Founder's explicit 7 points)
+## 12. Pre-Completion Checklist (per the Founder's explicit checklist)
 
-1. **Bootstrap registration verified** — `IntentRouter(event_bus=event_bus)` constructed in `bootstrap.py`, registered in the Container as `"intent_router"`. Confirmed via `test_bootstrap_registers_intent_router_in_container`.
-2. **Lifecycle registration verified** — registered in both the Service Registry (`ServiceDescriptor`, version `"0.0.9"`) and the Lifecycle Manager (`LifecycleState.REGISTERED`), alongside all eight prior core services. Confirmed via `test_bootstrap_registers_core_services_in_service_registry` and `test_core_services_report_registered_lifecycle_state`.
-3. **Service naming consistency verified** — registered as `"intent_router"`, confirmed against the live repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` (`"scheduler"`, `"memory_service"`, `"knowledge_service"`) before implementation, not assumed.
-4. **Both test suites addressed** — only `tests/` is canonical; `argus/tests/` is the confirmed stray duplicate described in Section 2 and was left untouched, not extended, per instruction.
-5. **All imports verified** — `python3 -m pyflakes` clean across every new and modified file in this live repository.
-6. **All regression tests verified passing** — `python -m unittest discover -s tests` reports `Ran 353 tests ... OK`; `python main.py` starts and shuts down cleanly with exit code 0.
-7. **Concise implementation summary** — see below.
+- ✓ **Bootstrap registration** — `WorkflowEngine(event_bus=event_bus)` constructed in `bootstrap.py`, registered in the Container as `"workflow_engine"`. Confirmed via `test_bootstrap_registers_workflow_engine_in_container`.
+- ✓ **Service Registry registration** — recorded as a `ServiceDescriptor` (version `"0.0.10"`) alongside all nine prior core services. Confirmed via `test_bootstrap_registers_core_services_in_service_registry`.
+- ✓ **Lifecycle registration** — registered in the Lifecycle Manager as `LifecycleState.REGISTERED`. Confirmed via `test_core_services_report_registered_lifecycle_state`.
+- ✓ **Event Bus integration** — all six workflow events verified published at the correct points via `tests/test_workflow_engine.py`'s `ExecuteSuccessTests`, `ExecuteFailureTests`, and `CancelTests`.
+- ✓ **Naming consistency** — `"workflow_engine"` verified against the repository's own `CORE_SERVICE_NAMES` convention before implementation, not assumed.
+- ✓ **All regression tests passing** — `python -m unittest discover -s tests` reports `Ran 416 tests ... OK`.
+- ✓ **`python main.py` starts cleanly** — exit code 0.
+- ✓ **No legacy files modified** — confirmed via `git status`/`git diff --stat`; only the 15 files listed in Section 5 were touched.
 
-## 14. Concise Implementation Summary
+## 13. Concise Implementation Summary
 
-Package 009 adds `argus/intent/` to the Founder's live ArgusOS repository: a deterministic, keyword-based text classifier (`parse_text`) and an `IntentRouter` that wraps classifications in immutable `Intent` objects, routes exclusively through the Event Bus (`IntentParsed`/`IntentRouted`/`IntentFailed`), and offers `register_handler()` as pure Event-Bus-subscription sugar with per-handler failure isolation. `IIntentRouter` inherits `IService`, making `IntentRouter` a second real adopter alongside Scheduler; unlike Scheduler, none of its methods are gated by lifecycle state, a finding appended to ADR-0002 (kept `Proposed`, unchanged). Registered as ArgusOS's ninth core service, `REGISTERED`-only. This package was regenerated once after a test-count discrepancy was traced to a pre-existing, out-of-scope stray duplicate directory structure in the live repository (Section 2) — not to any defect in the implementation itself, which was verified byte-identical across both attempts for every canonical file touched. 353 tests pass in `tests/` (72 new), 100% coverage on every new module, `python main.py` starts and shuts down cleanly. Only canonical locations (`argus/`, `tests/`, `design/`, `factory/`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md`) were modified; all duplicate and legacy files were left untouched, per instruction.
+Package 010 adds `argus/workflow/`: an immutable `Workflow`/`WorkflowStep` model, a `WorkflowState` enum, and a `WorkflowEngine` that registers and sequentially executes deterministic, callable-based steps, threading context from one step to the next. `IWorkflowEngine` inherits `IService`, and unlike IntentRouter, `execute()` is genuinely gated on the engine's own `RUNNING` state — mirroring Scheduler and reinforcing that finding in ADR-0002 (kept `Proposed`, unchanged). A failing step publishes `WorkflowFailed`, marks the workflow `FAILED`, and stops without raising out of `execute()`. The engine never imports another core service directly, verified structurally by test. Registered as ArgusOS's tenth core service, `REGISTERED`-only. 416 tests pass in `tests/` (63 new), 98% coverage on `argus/workflow/`, `python main.py` starts and shuts down cleanly. Built and verified entirely within the Founder-supplied repository; no commit, tag, or push was performed, per instruction — final validation and release remain the Founder's responsibility.
+
+## 14. Architectural Observations
+
+- The `IService` adoption pattern is now well-established across three packages with a consistent, testable shape: gate the single "do real work" method, leave registry/query operations ungated. If ADR-0002's duplication concern is eventually resolved in a dedicated package, this consistent shape (not just the duplication mechanism itself) is worth preserving in whatever replaces or refines `IService`.
+- `WorkflowStep`'s opaque-callable design is deliberately the same shape as `ScheduledTask.callback` (Package 008) and `IIntentRouter`'s registered handlers (Package 009): three separate packages have now independently arrived at "a plain callable is how ArgusOS core services accept caller-supplied behavior without creating an import dependency." This is worth naming as a de facto convention if a future architectural package formalizes cross-package standards.
+- No workflow step in this package's own test suite invokes another core service (by design — the engine doesn't care), so end-to-end proof that a Workflow can actually coordinate Knowledge/Memory/Scheduler/IntentRouter in practice does not yet exist anywhere in the codebase. That would require a future package (or example) where a step's action is constructed with a resolved service from the Container — worth flagging since "coordinates multiple Argus services" is this package's stated mission but is only structurally possible today, not yet demonstrated.

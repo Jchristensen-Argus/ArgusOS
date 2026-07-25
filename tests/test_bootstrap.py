@@ -10,6 +10,7 @@ from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
 from argus.scheduler import IScheduler, Scheduler
+from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry
 
 CORE_SERVICE_NAMES = (
@@ -22,6 +23,7 @@ CORE_SERVICE_NAMES = (
     "memory_service",
     "scheduler",
     "intent_router",
+    "workflow_engine",
 )
 
 
@@ -117,6 +119,17 @@ class BootstrapTests(unittest.TestCase):
             intent_router = application.container.resolve("intent_router")
             self.assertIsInstance(intent_router, IIntentRouter)
             self.assertIsInstance(intent_router, IntentRouter)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_workflow_engine_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("workflow_engine"))
+            workflow_engine = application.container.resolve("workflow_engine")
+            self.assertIsInstance(workflow_engine, IWorkflowEngine)
+            self.assertIsInstance(workflow_engine, WorkflowEngine)
         finally:
             application.shutdown()
 

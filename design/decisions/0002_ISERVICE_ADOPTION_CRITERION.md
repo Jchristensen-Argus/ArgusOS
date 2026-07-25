@@ -220,3 +220,49 @@ adoption should require a genuine behavioral gate as a precondition,
 not just a self-tracked state variable. This ADR's Status remains
 `Proposed`, per standing instruction; only the Founder/Architect
 elevates it to `Accepted` or opens the follow-up package.
+
+## Empirical Finding (Package 010 - Workflow Engine)
+
+`IWorkflowEngine` also inherits `IService`, per the Founder's explicit
+Package 010 work order, making `WorkflowEngine` a third real adopter.
+Unlike IntentRouter (Package 009), this finding *reinforces* Scheduler's
+(Package 008) rather than complicating it further.
+
+`WorkflowEngine.execute()` is genuinely gated on the engine's own
+`LifecycleState`: it raises `WorkflowError` unless the engine's
+self-tracked state is `RUNNING`, exactly mirroring
+`Scheduler.tick()`'s gating on `RUNNING`. `register_workflow()`,
+`cancel()`, and `get_workflow()` remain ungated registry operations,
+again mirroring Scheduler's `schedule`/`cancel`/`pause`/`resume`. This
+is the second of three `IService` adopters to date (Scheduler,
+IntentRouter, WorkflowEngine) where the interface carries real,
+distinct behavior rather than being satisfied only to meet an
+interface requirement.
+
+Combined with the Package 009 finding, the picture across all three
+adopters is now: two (Scheduler, WorkflowEngine) use `IService` for a
+genuine behavioral gate on their single "do the actual work" method;
+one (IntentRouter) adopts it with no behavioral gate at all, purely
+because the work order required `IIntentRouter(IService)`. This
+continues to support the original proposed criterion ("adopt
+`IService` only when `start()`/`stop()` would do real, distinct
+work") as a good discriminator - it would have correctly retained
+Scheduler and WorkflowEngine as good fits and flagged IntentRouter as
+questionable, had it been binding.
+
+The duplicate-state risk itself is unaffected by this finding - it is
+still structurally present for `WorkflowEngine` exactly as it was
+proven for `Scheduler` in Package 008 (self-tracked `LifecycleState`
+vs. whatever a `LifecycleManager` tracks by name for the same
+service), since nothing new was done here to resolve it. This finding
+adds evidence about *when* `IService` adoption is well-motivated, not
+about whether the duplication problem itself has been fixed.
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted. This
+package's finding strengthens (rather than weakens) the case for that
+future package encoding "requires a genuine behavioral gate" as an
+explicit precondition for `IService` adoption, now backed by three
+consistent data points instead of two. This ADR's Status remains
+`Proposed`, per standing instruction; only the Founder/Architect
+elevates it to `Accepted` or opens the follow-up package.

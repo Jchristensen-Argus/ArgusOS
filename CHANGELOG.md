@@ -465,3 +465,35 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Classification is a fixed keyword/precedence scheme with no punctuation normalization: a keyword immediately followed by punctuation (e.g. `"note: buy milk"`) does not satisfy the word-boundary check and falls through to weak-confidence substring matching with no `subject` entity extracted.
 - No confidence levels beyond the three fixed constants (1.0 strong / 0.6 weak / 0.0 no-match).
 - `register_handler()`'s duplicate check is exact `(intent_name, handler)` identity; two distinct handler objects with identical behavior are not considered duplicates.
+
+## Package 010 - Workflow Engine
+
+### Added
+
+- Added `argus/workflow/` package (Package 010 - Workflow Engine):
+  - `state.py` - `WorkflowState` (`PENDING`/`RUNNING`/`COMPLETED`/`FAILED`/`CANCELLED`).
+  - `workflow.py` - `WorkflowStep` (a name paired with a deterministic `StepAction` callable) and `Workflow`, an immutable dataclass (`id`, `name`, `state`, `steps`, `created_at`, `started_at`, `completed_at`, `metadata`).
+  - `interfaces.py` - `IWorkflowEngine`, inheriting `IService` (`register_workflow`, `execute`, `cancel`, `get_workflow`, plus the inherited `initialize`/`start`/`stop`/`status`).
+  - `engine.py` - `WorkflowEngine`: in-memory workflow registry; `execute()` runs a `PENDING` workflow's steps strictly in order, threading each step's returned context into the next, gated on the engine's own `IService` state being `RUNNING`; a failing step publishes `WorkflowFailed`, marks the workflow `FAILED`, and stops - the exception never propagates out of `execute()`.
+  - `exceptions.py` - `WorkflowError`, `WorkflowNotFoundError`, `DuplicateWorkflowError`, `InvalidWorkflowError`, `WorkflowExecutionError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/010_WORKFLOW_ENGINE.md`, including a note that no `design/specifications/WORKFLOW.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002 and 009).
+- Extended `argus/events/event_types.py`'s `EventType` with six new members: `WORKFLOW_STARTED`, `WORKFLOW_STEP_STARTED`, `WORKFLOW_STEP_COMPLETED`, `WORKFLOW_COMPLETED`, `WORKFLOW_FAILED`, `WORKFLOW_CANCELLED`.
+- Added `tests/test_workflow.py` (14 new tests), `tests/test_workflow_engine.py` (48 new tests).
+- Extended `tests/test_bootstrap.py` with a test confirming the Workflow Engine resolves from the Container (1 new test).
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `WorkflowEngine` (depends on the Event Bus) immediately after the Intent Router, and registers it in the Container as `"workflow_engine"`. Bootstrap order is now ... -> Intent Router -> Workflow Engine -> Register Core Services -> Application. `_register_core_services` now registers ten core services; `CORE_SERVICES_VERSION` bumped to `"0.0.10"`. WorkflowEngine's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same reasoning already applied to Scheduler and IntentRouter - with the added consequence that `execute()` will raise until a caller starts the engine directly, since (unlike IntentRouter) `execute()` is genuinely gated on the engine's own `RUNNING` state.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. WorkflowEngine is a third `IService` adopter, appended as a further empirical data point: its `execute()` is genuinely gated on lifecycle state, reinforcing Scheduler's finding rather than IntentRouter's - two of three real adopters to date use `IService` for a genuine behavioral gate. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- Steps execute strictly sequentially with no parallelism, branching, or conditional logic.
+- No retry/backoff for a failing step; a failure stops the entire workflow.
+- Workflows are held only in memory; nothing persists across process restarts.
+- A step's action is an opaque callable with no declared input/output schema beyond "receives a context mapping, returns a context mapping" - the engine cannot validate a step's contract beyond checking it is callable.
+- `cancel()` only succeeds against a `PENDING` workflow; since `execute()` is fully synchronous, a workflow is never observably `RUNNING` to an external caller, making mid-execution cancellation structurally impossible in this version (by design, per the work order's "no threading, no background execution").

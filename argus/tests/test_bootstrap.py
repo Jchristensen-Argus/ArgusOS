@@ -20,6 +20,7 @@ CORE_SERVICE_NAMES = (
     "memory_service",
     "scheduler",
     "intent_router",
+    "workflow_engine",
 )
 
 

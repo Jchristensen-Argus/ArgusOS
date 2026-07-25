@@ -82,3 +82,21 @@ class EventType(Enum):
     INTENT_PARSED = "intent_parsed"
     INTENT_ROUTED = "intent_routed"
     INTENT_FAILED = "intent_failed"
+
+    # Added by Package 010 - Workflow Engine, per this module's own
+    # "single place new event types are added" scope note above.
+    # WorkflowEngine publishes these on the existing Event Bus (see
+    # argus/workflow/engine.py). WORKFLOW_STARTED fires once per
+    # execute() call, before the first step runs. WORKFLOW_STEP_STARTED
+    # and WORKFLOW_STEP_COMPLETED bracket each individual step in
+    # order. WORKFLOW_COMPLETED fires once all steps succeed;
+    # WORKFLOW_FAILED fires instead if a step raises, and execution
+    # stops - no further steps run and no WORKFLOW_COMPLETED follows.
+    # WORKFLOW_CANCELLED fires only from cancel(), never from
+    # execute() - a workflow may only be cancelled while PENDING.
+    WORKFLOW_STARTED = "workflow_started"
+    WORKFLOW_STEP_STARTED = "workflow_step_started"
+    WORKFLOW_STEP_COMPLETED = "workflow_step_completed"
+    WORKFLOW_COMPLETED = "workflow_completed"
+    WORKFLOW_FAILED = "workflow_failed"
+    WORKFLOW_CANCELLED = "workflow_cancelled"
