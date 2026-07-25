@@ -122,3 +122,29 @@ class EventType(Enum):
     WORKFLOW_EXECUTED = "workflow_executed"
     RESPONSE_GENERATED = "response_generated"
     CONVERSATION_ENDED = "conversation_ended"
+
+    # Added by Package 012 - Intent Dispatcher, per this module's own
+    # "single place new event types are added" scope note above.
+    # IntentDispatcher publishes these on the existing Event Bus (see
+    # argus/dispatcher/dispatcher.py). INTENT_DISPATCHED fires once
+    # per dispatch() call, right after the lifecycle-state gate and
+    # input validation pass - marking that an Intent has entered the
+    # dispatch pipeline. ACTION_RESOLVED fires after resolve()
+    # successfully finds the Intent's mapped Action. WORKFLOW_SELECTED
+    # fires only when the resolved Action is specifically a
+    # WorkflowAction, carrying its workflow_id - it does not fire for
+    # any other Action kind. DISPATCH_STARTED fires immediately before
+    # the resolved Action's execute() is called. DISPATCH_COMPLETED
+    # fires once execute() returns successfully; DISPATCH_FAILED fires
+    # instead - with a "stage" payload field of "resolve" or "execute"
+    # - if resolve() finds no mapping or the resolved Action's
+    # execute() raises. DISPATCH_FAILED and DISPATCH_COMPLETED are
+    # mutually exclusive outcomes for a single dispatch() call, the
+    # same way WORKFLOW_FAILED/WORKFLOW_COMPLETED are for execute()
+    # (Package 010).
+    INTENT_DISPATCHED = "intent_dispatched"
+    ACTION_RESOLVED = "action_resolved"
+    WORKFLOW_SELECTED = "workflow_selected"
+    DISPATCH_STARTED = "dispatch_started"
+    DISPATCH_COMPLETED = "dispatch_completed"
+    DISPATCH_FAILED = "dispatch_failed"

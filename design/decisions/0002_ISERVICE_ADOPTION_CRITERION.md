@@ -305,3 +305,42 @@ as an explicit precondition for future `IService` adoption. This
 ADR's Status remains `Proposed`, per standing instruction; only the
 Founder/Architect elevates it to `Accepted` or opens the follow-up
 package.
+
+## Empirical Finding (Package 012 - Intent Dispatcher)
+
+`IIntentDispatcher` also inherits `IService`, per the Founder's
+explicit Package 012 work order, making `IntentDispatcher` a fifth
+real adopter. Like Scheduler (008), WorkflowEngine (010), and
+ConversationManager (011), this finding reinforces rather than
+complicates the picture: `dispatch()` - the dispatcher's single "do
+real work" method - is genuinely gated on the dispatcher's own
+`LifecycleState` being `RUNNING`, raising `DispatcherError` otherwise.
+`register_mapping()`, `remove_mapping()`, `resolve()`, and
+`list_mappings()` remain ungated registry operations, matching the
+precedent from all three prior gated adopters.
+
+Across all five adopters to date: four (Scheduler, WorkflowEngine,
+ConversationManager, IntentDispatcher) use `IService` for a genuine
+behavioral gate on their single "do the actual work" method; one
+(IntentRouter) adopts it with no behavioral gate, purely because its
+own work order required `IIntentRouter(IService)`. The pattern is now
+a 4-to-1 ratio across five independently-specified packages, continuing
+to support the criterion originally proposed in this ADR ("adopt
+`IService` only when `start()`/`stop()` would do real, distinct work")
+as a reliable discriminator.
+
+The duplicate-state risk itself remains unaffected by this finding -
+`IntentDispatcher` has the same self-tracked `LifecycleState` vs.
+`LifecycleManager`-tracked-by-name duplication as every other adopter,
+since nothing new was done here to resolve it.
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted. Five
+consistent data points (four gated, one not, and no adopter to date
+has needed anything the proposed criterion wouldn't have correctly
+predicted) make an even stronger case that whatever package eventually
+addresses ADR-0002 should encode "requires a genuine behavioral gate"
+as an explicit precondition for future `IService` adoption. This
+ADR's Status remains `Proposed`, per standing instruction; only the
+Founder/Architect elevates it to `Accepted` or opens the follow-up
+package.

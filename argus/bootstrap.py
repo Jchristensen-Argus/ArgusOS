@@ -11,8 +11,9 @@ Purpose:
     factory/packages/007_MEMORY_SERVICE.md,
     factory/packages/008_SCHEDULER_SERVICE.md,
     factory/packages/009_INTENT_ROUTER.md,
-    factory/packages/010_WORKFLOW_ENGINE.md, and
-    factory/packages/011_CONVERSATION_MANAGER.md.
+    factory/packages/010_WORKFLOW_ENGINE.md,
+    factory/packages/011_CONVERSATION_MANAGER.md, and
+    factory/packages/012_INTENT_DISPATCHER.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -94,25 +95,44 @@ Startup Sequence:
         execute() do. Registered only (LifecycleState.REGISTERED)
         here, for the same divergence-avoidance reasoning recorded in
         ADR-0002.
-    13. Register the eleven core services (Configuration, Logger,
+    13. Construct the Intent Dispatcher (depends on the Event Bus)
+        and register it with the Container, per Package 012.
+        Bootstrap is the only place that constructs IntentDispatcher
+        directly; every other subsystem must resolve it from the
+        Container. Unlike Conversation Manager, IntentDispatcher does
+        NOT depend on the Workflow Engine directly - see
+        argus/dispatcher/dispatcher.py's module docstring. Instead,
+        bootstrap.py itself constructs five WorkflowAction instances
+        (one per argus.dispatcher.mapping.DEFAULT_WORKFLOW_IDS entry),
+        each wrapping the already-constructed WorkflowEngine, and
+        registers them as the Intent Dispatcher's five Version 1
+        "Initial mappings" via register_mapping() - the only place in
+        this package where a WorkflowAction is actually constructed.
+        Like Scheduler, IntentRouter, WorkflowEngine, and Conversation
+        Manager, IntentDispatcher implements IService with a genuine
+        gate (dispatch() requires the dispatcher's own state to be
+        RUNNING) but is registered only (LifecycleState.REGISTERED)
+        here, for the same divergence-avoidance reasoning recorded in
+        ADR-0002.
+    14. Register the twelve core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
-        Engine, Conversation Manager) in the Service Registry
-        (identity/descriptive data only) and in the Lifecycle Manager,
-        where each enters LifecycleState.REGISTERED. None of them are
-        initialized or started by this package.
-    14. Construct and start the Application.
+        Engine, Conversation Manager, Intent Dispatcher) in the
+        Service Registry (identity/descriptive data only) and in the
+        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
+        None of them are initialized or started by this package.
+    15. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
     No engines (Atlas, Cortex, Hermes, Navigator, Sentinel) are
-    initialized here. Packages 003-011 register the Event Bus, Service
+    initialized here. Packages 003-012 register the Event Bus, Service
     Registry, Lifecycle Manager, Knowledge Service, Memory Service,
-    Scheduler, Intent Router, Workflow Engine, and Conversation
-    Manager respectively but do not change Application's lifecycle: no
-    lifecycle events are published, and no core service is initialized
-    or started, by this package (see the Package 005 engineering
-    notes).
+    Scheduler, Intent Router, Workflow Engine, Conversation Manager,
+    and Intent Dispatcher respectively but do not change Application's
+    lifecycle: no lifecycle events are published, and no core service
+    is initialized or started, by this package (see the Package 005
+    engineering notes).
 
 Architectural Revision (Package 005):
     ServiceDescriptor no longer carries a `state` field. Architecture
@@ -136,6 +156,12 @@ from argus.application import Application
 from argus.configuration import Configuration
 from argus.container import Container
 from argus.conversation import IConversationManager, ConversationManager
+from argus.dispatcher import (
+    DEFAULT_WORKFLOW_IDS,
+    IIntentDispatcher,
+    IntentDispatcher,
+    WorkflowAction,
+)
 from argus.events import IEventBus, InMemoryEventBus
 from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, JSONKnowledgeStorage, KnowledgeService
@@ -212,6 +238,14 @@ def bootstrap() -> Application:
     )
     container.register("conversation_manager", conversation_manager)
 
+    intent_dispatcher = IntentDispatcher(event_bus=event_bus)
+    for intent_type, workflow_id in DEFAULT_WORKFLOW_IDS.items():
+        intent_dispatcher.register_mapping(
+            intent_type,
+            WorkflowAction(workflow_id=workflow_id, workflow_engine=workflow_engine),
+        )
+    container.register("intent_dispatcher", intent_dispatcher)
+
     _register_core_services(
         service_registry=service_registry,
         lifecycle_manager=lifecycle_manager,
@@ -224,6 +258,7 @@ def bootstrap() -> Application:
         intent_router=intent_router,
         workflow_engine=workflow_engine,
         conversation_manager=conversation_manager,
+        intent_dispatcher=intent_dispatcher,
     )
 
     application = Application(container)
@@ -245,6 +280,7 @@ def _register_core_services(
     intent_router: IIntentRouter,
     workflow_engine: IWorkflowEngine,
     conversation_manager: IConversationManager,
+    intent_dispatcher: IIntentDispatcher,
 ) -> None:
     """
     Register the kernel's own core services with the Service Registry
@@ -258,20 +294,21 @@ def _register_core_services(
 
     Each of Configuration, the Logger, the Event Bus, the Service
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
-    Service, Scheduler, the Intent Router, the Workflow Engine, and
-    the Conversation Manager is recorded as a ServiceDescriptor
-    (identity and descriptive data only, no runtime state) in the
-    Service Registry, and as a LifecycleState.REGISTERED entry in the
-    Lifecycle Manager, which is the sole owner of runtime lifecycle
-    state for the Lifecycle Manager's own purposes. Neither
+    Service, Scheduler, the Intent Router, the Workflow Engine, the
+    Conversation Manager, and the Intent Dispatcher is recorded as a
+    ServiceDescriptor (identity and descriptive data only, no runtime
+    state) in the Service Registry, and as a LifecycleState.REGISTERED
+    entry in the Lifecycle Manager, which is the sole owner of runtime
+    lifecycle state for the Lifecycle Manager's own purposes. Neither
     initialize() nor start() is called on the Lifecycle Manager for
     any of them here. Scheduler, the Intent Router, the Workflow
-    Engine, and the Conversation Manager are the four classes among
-    these eleven that actually implement IService (see ADR-0002), but
-    this function still does not call any of their initialize()/
-    start() directly - see the Startup Sequence note in this module's
-    docstring for why exercising their real IService lifecycles during
-    bootstrap was deliberately avoided.
+    Engine, the Conversation Manager, and the Intent Dispatcher are
+    the five classes among these twelve that actually implement
+    IService (see ADR-0002), but this function still does not call
+    any of their initialize()/start() directly - see the Startup
+    Sequence note in this module's docstring for why exercising their
+    real IService lifecycles during bootstrap was deliberately
+    avoided.
 
     Parameters:
         service_registry: Where each core service is recorded as a
@@ -287,6 +324,7 @@ def _register_core_services(
         intent_router: The Intent Router instance.
         workflow_engine: The Workflow Engine instance.
         conversation_manager: The Conversation Manager instance.
+        intent_dispatcher: The Intent Dispatcher instance.
     """
     core_services = (
         ("configuration", configuration, type(configuration)),
@@ -300,6 +338,7 @@ def _register_core_services(
         ("intent_router", intent_router, IIntentRouter),
         ("workflow_engine", workflow_engine, IWorkflowEngine),
         ("conversation_manager", conversation_manager, IConversationManager),
+        ("intent_dispatcher", intent_dispatcher, IIntentDispatcher),
     )
 
     for name, instance, interface in core_services:

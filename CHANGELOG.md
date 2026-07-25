@@ -531,3 +531,35 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Exactly one active session at a time (Version 1 constraint); starting a second session while one is active raises `ActiveSessionExistsError`.
 - Sessions and messages are held only in memory; nothing persists across process restarts.
 - `receive()` does not call `IIntentRouter.route()` or `register_handler()` - only `parse()`'s direct return value is used, so other Event Bus subscribers to `IntentRouted` are not triggered by a conversation turn.
+
+## Package 012 - Intent Dispatcher
+
+### Added
+
+- Added `argus/dispatcher/` package (Package 012 - Intent Dispatcher):
+  - `action.py` - `Action`, an abstract base class declaring one method (`execute()`) plus a `kind` label, and `WorkflowAction`, Version 1's only concrete Action, which delegates `execute()` to an injected `IWorkflowEngine.execute()` call for a given `workflow_id`.
+  - `mapping.py` - `DEFAULT_WORKFLOW_IDS`: a pure-data table pairing each `IntentType` with the conventional Version 1 workflow_id `bootstrap.py` registers a `WorkflowAction` against for it (`answer_workflow`, `command_workflow`, `memory_workflow`, `reminder_workflow`, `unknown_handler_workflow`). Contains no service dependency and constructs no Action itself.
+  - `interfaces.py` - `IIntentDispatcher`, inheriting `IService` (`register_mapping`, `remove_mapping`, `resolve`, `dispatch`, `list_mappings`, plus the inherited `initialize`/`start`/`stop`/`status`).
+  - `dispatcher.py` - `IntentDispatcher`: an in-memory `IntentType -> Action` registry (`register_mapping`/`remove_mapping`/`list_mappings`, all ungated) plus `resolve()` (a pure lookup) and `dispatch()` (resolves an Intent to its Action and calls `action.execute()`, publishing `IntentDispatched`, `ActionResolved`, `WorkflowSelected` (WorkflowAction only), `DispatchStarted`, and then `DispatchCompleted` or `DispatchFailed`). Never imports `argus.workflow`, `argus.intent.router`, `argus.intent.parser`, or `argus.conversation` - verified structurally by test.
+  - `exceptions.py` - `DispatcherError`, `InvalidIntentError`, `InvalidActionError`, `NoMappingError`, `DuplicateMappingError`, `MappingNotFoundError`, `ActionExecutionError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/012_INTENT_DISPATCHER.md`, including a note that no `design/specifications/DISPATCHER.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009, 010, and 011).
+- Extended `argus/events/event_types.py`'s `EventType` with six new members: `INTENT_DISPATCHED`, `ACTION_RESOLVED`, `WORKFLOW_SELECTED`, `DISPATCH_STARTED`, `DISPATCH_COMPLETED`, `DISPATCH_FAILED`.
+- Added `tests/test_dispatcher.py` (19 new tests: `Action`/`WorkflowAction`/`DEFAULT_WORKFLOW_IDS`), `tests/test_intent_dispatcher.py` (45 new tests: `IntentDispatcher` itself).
+- Extended `tests/test_bootstrap.py` with two new tests confirming the Intent Dispatcher resolves from the Container and has all five initial mappings registered.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"intent_dispatcher"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added. No other line in that file, and no other duplicate-tree file, was touched.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `IntentDispatcher` (depends on the Event Bus only) immediately after the Conversation Manager, and registers it in the Container as `"intent_dispatcher"`. Bootstrap also constructs five `WorkflowAction` instances - one per `argus.dispatcher.mapping.DEFAULT_WORKFLOW_IDS` entry, each wrapping the already-constructed `WorkflowEngine` - and registers them as the dispatcher's five Version 1 "Initial mappings" via `register_mapping()`. Bootstrap order is now ... -> Conversation Manager -> Intent Dispatcher -> Register Core Services -> Application. `_register_core_services` now registers twelve core services. `CORE_SERVICES_VERSION` remains `"0.1.1"` - unchanged by this package, per its own explicit Version Policy (the constant already matched the repository's actual release, `v0.1.1`, before this package began - see `IMPLEMENTATION_REPORT.md`'s Repository Verification Note for the correction that preceded this package). IntentDispatcher's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same reasoning already applied to Scheduler, IntentRouter, WorkflowEngine, and ConversationManager.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. IntentDispatcher is a fifth `IService` adopter, appended as a further empirical data point: its `dispatch()` is genuinely gated on lifecycle state, reinforcing the pattern set by Scheduler, WorkflowEngine, and ConversationManager - four of five real adopters to date use `IService` for a genuine behavioral gate. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- The five Version 1 "Initial mappings" reference `workflow_id`s (`answer_workflow`, etc.) that no other package has registered an actual Workflow against - dispatching any of them raises `ActionExecutionError` (wrapping `WorkflowNotFoundError`) until some future package registers real workflows under those ids. This is expected, by-design Version 1 behavior, not a defect - see `factory/packages/012_INTENT_DISPATCHER.md`.
+- `IntentDispatcher` is not wired into `ConversationManager` - the two compose only if some future caller explicitly feeds a resolved Intent from one into the other; `manager.py` was not modified by this package.
+- Mappings are held only in memory; nothing persists across process restarts.
+- `IntentDispatcher` does not import `IWorkflowEngine` directly (see the Architectural Note in `factory/packages/012_INTENT_DISPATCHER.md`) - this is a deliberate design choice for extensibility, not a limitation, but is called out here since it differs from ConversationManager's (Package 011) direct-dependency pattern.

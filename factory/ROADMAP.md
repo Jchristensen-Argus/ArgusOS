@@ -20,6 +20,7 @@
 - [x] Intent Router (Intent/IntentType, parse_text, IIntentRouter(IService), IntentRouter, Package 009)
 - [x] Workflow Engine (Workflow/WorkflowStep, WorkflowState, IWorkflowEngine(IService), WorkflowEngine, Package 010)
 - [x] Conversation Manager (ConversationSession/ConversationMessage, ConversationState, IConversationManager(IService), ConversationManager, Package 011)
+- [x] Intent Dispatcher (Action/WorkflowAction, IIntentDispatcher(IService), IntentDispatcher, Package 012)
 
 ---
 

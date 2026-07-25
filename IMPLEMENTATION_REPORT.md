@@ -1,41 +1,42 @@
-# ArgusOS Implementation Report — Package 011: Conversation Manager
+# ArgusOS Implementation Report — Package 012: Intent Dispatcher
 
 ## 1. Package Overview
 
-Package 011 adds `argus/conversation/`, ArgusOS's first cross-service coordinator. `ConversationManager` tracks a single active session's state and full message history, and for each user message delegates classification to `IIntentRouter.parse()` and, when a `workflow_id` is supplied and currently registered, execution to `IWorkflowEngine.execute()` — it never classifies text or runs workflow steps itself, verified structurally by test (the module never imports `argus.intent.parser`, `argus.knowledge`, `argus.memory`, or `argus.scheduler`). Responses are generated from a small, fixed, deterministic template table keyed on the resolved intent's name — never AI/LLM inference. `IConversationManager` inherits `IService`; `receive()` is genuinely gated on the manager's own lifecycle state being `RUNNING` (mirroring Scheduler and WorkflowEngine), while `start_session`/`end_session`/`history`/`active_session` remain ungated registry operations. `ConversationManager` is registered as ArgusOS's eleventh core service. All 416 pre-existing canonical tests still pass; 71 new tests were added (487 total in `tests/`), all passing under `python -m unittest discover -s tests`. No pytest anywhere in this package. `python main.py` starts and shuts down cleanly.
+Package 012 adds `argus/dispatcher/`, the layer that translates a resolved `Intent` into an executable `Action` and delegates its execution — closing the gap between classification (`IIntentRouter`, Package 009) and execution (`IWorkflowEngine`, Package 010). `IntentDispatcher` maintains a configurable, in-memory `IntentType -> Action` mapping (`register_mapping`/`remove_mapping`/`list_mappings`, all ungated registry operations) and a `dispatch()` method that resolves an Intent to its Action and calls that Action's own `execute()` — it never parses intents, never runs a workflow's steps itself, and never performs AI reasoning, verified structurally by test (the module never imports `argus.workflow`, `argus.intent.router`, `argus.intent.parser`, or `argus.conversation`). `IIntentDispatcher` inherits `IService`; `dispatch()` is genuinely gated on the dispatcher's own lifecycle state being `RUNNING` (mirroring Scheduler, WorkflowEngine, and ConversationManager), while the four registry methods remain ungated. `IntentDispatcher` is registered as ArgusOS's twelfth core service. All 487 pre-existing canonical tests still pass; 66 new tests were added (553 total in `tests/`), all passing under `python -m unittest discover -s tests`. No pytest anywhere in this package. `python main.py` starts and shuts down cleanly.
 
 ## 2. Repository Verification Note
 
-Before writing any code, the uploaded repository was verified fresh against the Founder's three explicit preconditions: it already contains Package 010 (commit `77a32ac`, "Implement Package 010 Workflow Engine"), `argus/workflow/` is present, and a version marker at or beyond `v0.1.0` exists (git tag `v0.1.0`, confirmed via `git rev-list -n 1 v0.1.0` to point at exactly that same commit). All three passed; 416 canonical tests confirmed passing on this baseline before any Package 011 file was touched.
+Before writing any code, the uploaded repository was verified fresh against the Founder's four explicit preconditions: it already contains Package 011 (commit `7dbfb80`, "Implement Package 011 Conversation Manager"), `argus/conversation/` is present, and a version marker at or beyond `v0.1.1` exists (git tag `v0.1.1`).
 
-One discrepancy was found during this verification, documented rather than silently resolved: the repository's git tag scheme changed from per-package `v0.0.N` to semantic `v0.1.0` starting at the Package 010 tag, but `argus/bootstrap.py`'s own `CORE_SERVICES_VERSION` constant had not been updated to match - it still read the superseded `"0.0.10"`. An initial delivery of this package bumped the constant to `"0.1.1"`, by direct analogy with every prior package's own convention of bumping it to that package's target version during implementation. The Founder corrected this with a standing policy: `CORE_SERVICES_VERSION` must always reflect the repository's *last actual release* (git tag + committed history), not the package currently being implemented, since advancing it during implementation makes the source code claim a version ahead of git history. Package 011 has not been integrated, committed, or tagged, so `CORE_SERVICES_VERSION` remains `"0.1.0"` - the currently released version - in this delivery. `bootstrap.py`'s comment at the constant's definition now states this policy explicitly for future packages.
+The first upload failed the fourth precondition, "`CORE_SERVICES_VERSION` matches the latest released version": the repository's `v0.1.1` tag confirmed Package 011 had genuinely been integrated, committed, and released, but `argus/bootstrap.py`'s own `CORE_SERVICES_VERSION` constant still read `"0.1.0"` — the value that had been correct only *before* that release. Per this package's own explicit "if any verification fails, STOP" instruction, this was reported to the Founder rather than silently corrected or worked around. The Founder corrected the repository directly (a dedicated commit, `1df8dbb`, "Synchronize repository version with v0.1.1 release," bumping the constant to `"0.1.1"` and rewriting its comment) and supplied a corrected upload. Pre-flight verification was re-run against that corrected repository and passed cleanly: `CORE_SERVICES_VERSION == "0.1.1"` matching tag `v0.1.1`, 487 canonical tests passing, `python main.py` starting and shutting down cleanly — all confirmed before any Package 012 code was written.
 
-Per the Founder's explicit release rules, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, push, or git-history modification of any kind was performed, and this package is not being reported as complete - final validation, integration, release, tagging, and git operations are the Founder's responsibility, to be performed against the live repository after independent regression testing.
+Per the Founder's explicit release rules, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, push, or git-history modification of any kind was performed, `CORE_SERVICES_VERSION` was not changed by this package, and this package is not being reported as complete — final validation, integration, release, tagging, and git operations are the Founder's responsibility, to be performed against the live repository after independent regression testing.
 
 ## 3. Architectural Rationale
 
-No `design/specifications/CONVERSATION.md` exists - the same situation as Packages 002, 009, and 010. Every structural decision traces to the Founder's explicit work order.
+No `design/specifications/DISPATCHER.md` exists — the same situation as Packages 002, 009, 010, and 011. Every structural decision traces to the Founder's explicit work order.
 
-The central open question the work order did not resolve explicitly: what concretely does "delegates execution to the Workflow Engine" mean, given no intent-to-workflow catalog or routing table was specified anywhere in the repository? Inventing one would itself have been exactly the kind of business logic the work order says this manager "should never contain." Instead, `receive()` accepts an optional, caller-supplied `workflow_id`. If given and currently registered, `receive()` calls `IWorkflowEngine.execute()` for real and publishes `WorkflowExecuted`; if omitted, or if the delegated call raises (`WorkflowNotFoundError` or `WorkflowError`, e.g. because the Workflow Engine hasn't been started), the attempt is skipped gracefully and `receive()` still returns a response. This keeps the delegation structurally genuine - a real `IWorkflowEngine.execute()` call happens end-to-end when a caller supplies a valid, ready workflow - without ConversationManager deciding, on its own, which workflow an intent "should" trigger.
+The central design question: how to satisfy "the architecture should allow future Action types without redesigning the dispatcher" literally, not just aspirationally. Rejected the approach that would have mirrored `ConversationManager`'s own precedent (Package 011) of taking `IWorkflowEngine` directly as a constructor dependency — that would tie `dispatcher.py` to one specific backend, exactly the coupling the work order's extensibility requirement warns against. Instead, `Action` is a one-method abstract base class (`execute()`), and each concrete Action is constructed with whatever backend it needs: `WorkflowAction` takes a `workflow_id` and an `IWorkflowEngine`; a future `PluginAction`, `AgentAction`, or `ConnectorAction` would each take their own backend, entirely outside `dispatcher.py`'s knowledge. `IntentDispatcher.__init__` takes only an `IEventBus` — confirmed via a source-inspection test that `dispatcher.py` contains no `argus.workflow` import at all, the same technique Packages 010 and 011 used to structurally prove their own loose-coupling claims.
 
-## 4. IService Adoption — A Fourth Data Point for ADR-0002
+The second design question: what do the five Version 1 "Initial mappings" (QUESTION -> Answer Workflow, etc.) actually point to, given no other package has ever created a real "answer" or "command" workflow with real business logic — inventing one would itself have meant writing exactly the kind of business logic this package's work order never asked for. Followed the precedent `ConversationManager.receive()` already set for its own `workflow_id` parameter: register the mapping as data (a conventional `workflow_id` string, defined in `argus/dispatcher/mapping.py`'s `DEFAULT_WORKFLOW_IDS`), and let `IWorkflowEngine.execute()`'s own `WorkflowNotFoundError` be the honest, tested answer — wrapped as `ActionExecutionError` and published as `DispatchFailed` with `stage="execute"` — when nothing is registered under that id yet. See Section 9 and `factory/packages/012_INTENT_DISPATCHER.md`'s "The Five Initial Mappings" section for the full reasoning.
 
-`IConversationManager` inherits `IService`, per the Founder's explicit instruction, making `ConversationManager` a fourth real adopter after Scheduler (008), IntentRouter (009), and WorkflowEngine (010). `receive()` is genuinely gated on the manager's own state being `RUNNING`, exactly mirroring `Scheduler.tick()` and `WorkflowEngine.execute()`; the four registry-style methods remain ungated, matching both prior gated adopters' precedent.
+## 4. IService Adoption — A Fifth Data Point for ADR-0002
 
-Across all four adopters to date: three (Scheduler, WorkflowEngine, ConversationManager) use `IService` for a genuine behavioral gate; one (IntentRouter) does not, having no "active work" phase to gate. This 3-to-1 pattern, now observed across four independently-specified packages, continues to support ADR-0002's originally proposed criterion. This finding has been appended to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`; its Status remains `Proposed`, per standing instruction.
+`IIntentDispatcher` inherits `IService`, per the Founder's explicit instruction, making `IntentDispatcher` a fifth real adopter after Scheduler (008), IntentRouter (009), WorkflowEngine (010), and ConversationManager (011). `dispatch()` is genuinely gated on the dispatcher's own state being `RUNNING`, exactly mirroring `Scheduler.tick()`, `WorkflowEngine.execute()`, and `ConversationManager.receive()`; the four registry-style methods remain ungated, matching all three prior gated adopters' precedent.
+
+Across all five adopters to date: four (Scheduler, WorkflowEngine, ConversationManager, IntentDispatcher) use `IService` for a genuine behavioral gate; one (IntentRouter) does not, having no "active work" phase to gate. This 4-to-1 pattern, now observed across five independently-specified packages, continues to support ADR-0002's originally proposed criterion. This finding has been appended to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`; its Status remains `Proposed`, per standing instruction.
 
 ## 5. Directory Tree (files touched)
 
 ```
 argus/
-    conversation/
+    dispatcher/
         __init__.py
+        action.py
+        dispatcher.py
         exceptions.py
         interfaces.py
-        state.py
-        message.py
-        session.py
-        manager.py
+        mapping.py
     bootstrap.py                       (modified)
     events/
         event_types.py                 (modified)
@@ -44,12 +45,12 @@ design/
         0002_ISERVICE_ADOPTION_CRITERION.md   (modified — appended finding)
 factory/
     packages/
-        011_CONVERSATION_MANAGER.md    (new)
+        012_INTENT_DISPATCHER.md       (new)
     ROADMAP.md                          (modified)
 tests/
     test_bootstrap.py                   (modified)
-    test_conversation.py                (new)
-    test_conversation_manager.py        (new)
+    test_dispatcher.py                  (new)
+    test_intent_dispatcher.py           (new)
 argus/tests/test_bootstrap.py           (modified — CORE_SERVICE_NAMES tuple only, per explicit instruction)
 CHANGELOG.md                            (modified)
 DEVLOG.md                               (modified)
@@ -60,32 +61,32 @@ No file outside this list was created, deleted, moved, or modified. `argus/lifec
 
 ## 6. Integration Notes
 
-- `ConversationManager(event_bus, intent_router, workflow_engine)` — constructed in `bootstrap.py` immediately after the Workflow Engine, depending on the Event Bus, Intent Router, and Workflow Engine (all already constructed by that point).
-- Registered in the Container as `"conversation_manager"`, in the Service Registry as a `ServiceDescriptor` (version `"0.1.0"`, the repository's currently released version - see Section 2), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — matching the treatment of all ten prior core services. Not initialized or started by bootstrap; `receive()` requires a caller to call `manager.initialize()`/`start()` directly first, exactly as Scheduler and WorkflowEngine already require for their own gated methods.
-- `argus/events/event_types.py` extended with six new members: `CONVERSATION_STARTED`, `MESSAGE_RECEIVED`, `INTENT_RESOLVED`, `WORKFLOW_EXECUTED`, `RESPONSE_GENERATED`, `CONVERSATION_ENDED`.
-- Naming (`"conversation_manager"`) verified against the repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` convention before implementation.
-- The repository's pre-existing, known stray duplicate `argus/tests/test_bootstrap.py` had its `CORE_SERVICE_NAMES` tuple synchronized with `"conversation_manager"` added, per this package's explicit Repository Rules - and only that tuple. Confirmed by inspecting that file's prior history: `"intent_router"` and `"workflow_engine"` were each previously added there the same way (tuple entry only, no dedicated per-service test method), so this package's sync matches the file's own established, empirically-observed pattern rather than inventing a new one.
+- `IntentDispatcher(event_bus)` — constructed in `bootstrap.py` immediately after the Conversation Manager, depending only on the Event Bus. Five `WorkflowAction` instances are then constructed (one per `DEFAULT_WORKFLOW_IDS` entry, each wrapping the already-constructed `WorkflowEngine`) and registered via `register_mapping()` — the only place in this package a `WorkflowAction` is actually built.
+- Registered in the Container as `"intent_dispatcher"`, in the Service Registry as a `ServiceDescriptor` (version `"0.1.1"`, the repository's currently released version — see Section 2), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — matching the treatment of all eleven prior core services. Not initialized or started by bootstrap; `dispatch()` requires a caller to call `dispatcher.initialize()`/`start()` directly first, exactly as Scheduler, WorkflowEngine, and ConversationManager already require for their own gated methods.
+- `argus/events/event_types.py` extended with six new members: `INTENT_DISPATCHED`, `ACTION_RESOLVED`, `WORKFLOW_SELECTED`, `DISPATCH_STARTED`, `DISPATCH_COMPLETED`, `DISPATCH_FAILED`.
+- Naming (`"intent_dispatcher"`) verified against the repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` convention before implementation.
+- The repository's pre-existing, known stray duplicate `argus/tests/test_bootstrap.py` had its `CORE_SERVICE_NAMES` tuple synchronized with `"intent_dispatcher"` added, per the standing Repository Rule introduced in Package 011 — and only that tuple. Matches the file's own established pattern (`"scheduler"`/`"intent_router"`/`"workflow_engine"`/`"conversation_manager"` were each added the same way: tuple entry only, no dedicated per-service test method).
 
 ## 7. Test Results
 
 Canonical suite (`tests/`):
 ```
 python -m unittest discover -s tests
-Ran 487 tests in 0.043s
+Ran 553 tests in 0.057s
 OK
 ```
 
 The synchronized duplicate `argus/tests/` also verified passing standalone (unaffected by the one-line sync):
 ```
 python -m unittest discover -s argus/tests -p "test_*.py"
-Ran 64 tests in 0.015s
+Ran 64 tests in 0.016s
 OK
 ```
 
 `python main.py`:
 ```
-2026-07-25 11:27:10 [INFO] argus: ArgusOS application started.
-2026-07-25 11:27:10 [INFO] argus: ArgusOS application shutting down.
+2026-07-25 14:16:58 [INFO] argus: ArgusOS application started.
+2026-07-25 14:16:58 [INFO] argus: ArgusOS application shutting down.
 ```
 Exit code 0.
 
@@ -95,69 +96,67 @@ Measured with `coverage.py`, `python -m coverage run -m unittest discover -s tes
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/bootstrap.py` | 49 | 0 | 100% |
-| `argus/conversation/__init__.py` | 7 | 0 | 100% |
-| `argus/conversation/exceptions.py` | 5 | 0 | 100% |
-| `argus/conversation/interfaces.py` | 21 | 5 | 76% (unreachable abstract-method stub bodies, same structural pattern as every other ABC in this codebase) |
-| `argus/conversation/manager.py` | 107 | 0 | 100% |
-| `argus/conversation/message.py` | 19 | 0 | 100% |
-| `argus/conversation/session.py` | 18 | 0 | 100% |
-| `argus/conversation/state.py` | 6 | 0 | 100% |
+| `argus/bootstrap.py` | 54 | 0 | 100% |
+| `argus/dispatcher/__init__.py` | 6 | 0 | 100% |
+| `argus/dispatcher/action.py` | 23 | 1 | 96% (unreachable `raise NotImplementedError` in the abstract `Action.execute()` stub — Python's ABC machinery prevents instantiating a class with unimplemented abstract methods, so this line can never execute) |
+| `argus/dispatcher/dispatcher.py` | 80 | 0 | 100% |
+| `argus/dispatcher/exceptions.py` | 7 | 0 | 100% |
+| `argus/dispatcher/interfaces.py` | 16 | 0 | 100% |
+| `argus/dispatcher/mapping.py` | 4 | 0 | 100% |
 
-Package 011 total (`argus/conversation/*`): 183 statements, 97% covered. Full `argus/*` coverage: 1,486 statements, 98% covered.
+Package 012 total (`argus/dispatcher/*`): 136 statements, 99% covered (135/136). Full `argus/*` coverage: 1,631 statements, 98% covered (1,597/1,631).
 
 ## 9. Engineering Decisions / Deviations from the Work Order
 
-- **`workflow_id` is an explicit, optional parameter to `receive()`**, not derived automatically from the resolved Intent. See Section 3 — this avoids inventing an intent-to-workflow routing table, which the work order's own "should never contain business logic from other services" line would have made a real violation.
-- **A failed or absent workflow delegation never raises out of `receive()`.** `WorkflowNotFoundError`/`WorkflowError` are caught and treated as "no delegation occurred" - `WORKFLOW_EXECUTED` simply doesn't publish, and the conversation turn still completes normally.
-- **Removed a provably-unreachable defensive branch during coverage review.** `receive()` originally contained an explicit `if session.state == ConversationState.CLOSED: raise ...` check. Tracing the state machine showed this can never trigger: `end_session()` is the only path that sets `CLOSED`, and it always clears the active-session pointer in the same call, so `_require_active_session()` already raises `NoActiveSessionError` first in every real scenario. Removed rather than left as untested dead code, per the coding standard's "no dead code" requirement; `interfaces.py`'s docstring was updated to explain the invariant instead.
-- **`CORE_SERVICES_VERSION` remains `"0.1.0"`, not bumped to `"0.1.1"` or `"0.0.11"`.** Per the Founder's standing policy: this constant tracks the repository's last actual release, not the package being implemented. See Section 2's Repository Verification Note.
-- **`argus/tests/test_bootstrap.py` (duplicate tree) synchronized, tuple-only**, per this package's explicit, new-for-this-package Repository Rule. This is the only duplicate-tree file touched.
-- **Exception base named `ConversationError`**, matching the `<Subsystem>Error` convention (`SchedulerError`, `IntentError`, `WorkflowError`).
+- **`IntentDispatcher` does not take an `IWorkflowEngine` constructor dependency**, unlike `ConversationManager`'s direct-dependency precedent. This is what actually makes the work order's "without redesigning the dispatcher" requirement true rather than aspirational — see Section 3 and `factory/packages/012_INTENT_DISPATCHER.md`'s Architectural Note. `WorkflowAction` carries the `IWorkflowEngine` dependency instead, and `bootstrap.py` is the only place a `WorkflowAction` is constructed.
+- **The five "Initial mappings" reference `workflow_id`s with no real workflow registered against them anywhere in the repository.** This is a deliberate scope boundary, not an oversight — see Section 3. `mapping.py`'s own module docstring documents this explicitly, and `tests/test_intent_dispatcher.py::DispatchFailureTests` tests the resulting `ActionExecutionError` failure mode directly.
+- **`WorkflowSelected` is the one dispatcher-level event that is Action-kind-specific.** It fires only when `isinstance(action, WorkflowAction)` is true — the single, deliberately narrow place `dispatcher.py` knows anything about a concrete Action subclass, used solely to read `WorkflowAction`'s own `workflow_id` property for the event payload, not to alter execution behavior.
+- **`CORE_SERVICES_VERSION` remains `"0.1.1"`, unchanged by this package.** Per the Founder's standing policy and this package's own explicit Version Policy: the constant already matched the repository's actual release before this package began (see Section 2's Repository Verification Note for the correction that preceded this package).
+- **`argus/tests/test_bootstrap.py` (duplicate tree) synchronized, tuple-only**, per the standing Repository Rule introduced in Package 011. This is the only duplicate-tree file touched.
+- **Exception base named `DispatcherError`**, matching the `<Subsystem>Error` convention (`SchedulerError`, `IntentError`, `WorkflowError`, `ConversationError`).
 
 ## 10. Known Limitations
 
-- Response generation is template-based, not natural language generation.
-- No automatic intent-to-workflow mapping (see Section 3).
-- Exactly one active session at a time (Version 1 constraint).
-- Sessions and messages are held only in memory.
-- `receive()` does not call `IIntentRouter.route()` or `register_handler()`, so other Event Bus subscribers to `IntentRouted` are not triggered by a conversation turn - only `parse()`'s direct return value is used.
+- The five Version 1 "Initial mappings" will raise `ActionExecutionError` when actually dispatched, until some future package registers real Workflows under their conventional `workflow_id`s (see Section 9).
+- `IntentDispatcher` is not wired into `ConversationManager` — `manager.py` was not modified by this package; the two compose only if some future caller explicitly feeds a resolved Intent from one into the other (proven possible, not automatic, by `tests/test_intent_dispatcher.py::ConversationManagerIntegrationTests::test_end_to_end_conversation_manager_intent_flows_into_dispatcher`).
+- Mappings are held only in memory; nothing persists across process restarts.
+- Only `WorkflowAction` exists as a concrete Action in Version 1; `PluginAction`/`AgentAction`/`ConnectorAction` are architecturally anticipated but not implemented.
 - The repository's stray `argus/` duplicate tree (beyond the one explicitly-required `test_bootstrap.py` sync) and legacy pre-Factory files remain unresolved, out of scope per the Founder's explicit repository rules.
 
 ## 11. Repository-Derived Package Metrics (measured, not estimated)
 
-Measured via `git diff --stat` against the working tree's unmodified base commit `77a32ac` (no commit was made — see Section 2):
+Measured via `git diff --stat` against the working tree's unmodified base commit `1df8dbb` (no commit was made — see Section 2):
 
-- Files Created: 9 (7 `argus/conversation/*.py`, `factory/packages/011_CONVERSATION_MANAGER.md`, 2 new test files)
+- Files Created: 9 (6 `argus/dispatcher/*.py`, `factory/packages/012_INTENT_DISPATCHER.md`, 2 new test files)
 - Files Modified: 9 (`argus/bootstrap.py`, `argus/events/event_types.py`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, `factory/ROADMAP.md`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md`)
-- Lines Added: 1,791 / Lines Removed: 31
-- Unit Tests: 487 passing in canonical `tests/` (71 new: 21 model + 49 manager + 1 bootstrap)
-- Coverage: 97% (Package 011 modules), 98% (full `argus/*`)
-- Public Classes: 3 (`ConversationSession`, `ConversationMessage`, `ConversationManager`) plus 2 Enums (`ConversationState`, `ConversationRole`)
-- Public Interfaces: 1 (`IConversationManager`)
+- Lines Added: 1,887 / Lines Removed: 92
+- Unit Tests: 553 passing in canonical `tests/` (66 new: 19 model + 45 dispatcher + 2 bootstrap)
+- Coverage: 99% (Package 012 modules), 98% (full `argus/*`)
+- Public Classes: 2 (`WorkflowAction`, `IntentDispatcher`) plus 1 abstract base class (`Action`)
+- Public Interfaces: 1 (`IIntentDispatcher`)
 - New Dependencies: 0
 - External Libraries: 0 (standard library only)
 - Architecture Deviations: 0 (see Section 9 for documented, non-architectural deviations)
 
 ## 12. Pre-Completion Checklist (per the Founder's explicit checklist)
 
-- ✓ **Bootstrap registration** — `ConversationManager(...)` constructed in `bootstrap.py`, registered in the Container as `"conversation_manager"`. Confirmed via `test_bootstrap_registers_conversation_manager_in_container`.
-- ✓ **Service Registry registration** — recorded as a `ServiceDescriptor` (version `"0.1.0"`, the repository's currently released version) alongside all ten prior core services.
+- ✓ **Bootstrap registration** — `IntentDispatcher(...)` constructed in `bootstrap.py`, registered in the Container as `"intent_dispatcher"`. Confirmed via `test_bootstrap_registers_intent_dispatcher_in_container`.
+- ✓ **Service registration** — recorded as a `ServiceDescriptor` (version `"0.1.1"`, the repository's currently released version) alongside all eleven prior core services.
 - ✓ **Lifecycle integration** — registered in the Lifecycle Manager as `LifecycleState.REGISTERED`.
-- ✓ **Event Bus integration** — all six conversation events verified published at the correct points via `tests/test_conversation_manager.py`.
-- ✓ **Workflow Engine delegation** — verified via `WorkflowEngineDelegationTests`, including that a real `IWorkflowEngine.execute()` call occurs and its result is reflected in the workflow's own state.
-- ✓ **Intent Router delegation** — verified via `IntentRouterDelegationTests`, including a spy on `IIntentRouter.parse()` confirming the manager calls it with the exact received text.
-- ✓ **Naming consistency** — `"conversation_manager"` verified against the repository's own `CORE_SERVICE_NAMES` convention before implementation.
-- ✓ **All regression tests passing** — `python -m unittest discover -s tests` reports `Ran 487 tests ... OK`.
+- ✓ **Conversation Manager integration** — verified via `ConversationManagerIntegrationTests`: source-inspection proof that `argus/dispatcher/` never imports `argus.conversation`, plus an end-to-end composition test showing a real `ConversationManager`-classified `Intent` flows correctly into `IntentDispatcher.dispatch()`.
+- ✓ **Workflow Engine delegation** — verified via `WorkflowEngineDelegationTests`, including that a real `IWorkflowEngine.execute()` call occurs and its result is reflected in the workflow's own state, and that `dispatcher.py` itself never imports `argus.workflow`.
+- ✓ **Event Bus integration** — all six dispatch events verified published at the correct points, in order, via `tests/test_intent_dispatcher.py`.
+- ✓ **Naming consistency** — `"intent_dispatcher"` verified against the repository's own `CORE_SERVICE_NAMES` convention before implementation.
+- ✓ **Regression suite passes** — `python -m unittest discover -s tests` reports `Ran 553 tests ... OK`.
 - ✓ **`python main.py` starts cleanly** — exit code 0.
-- ✓ **No unintended repository changes** — confirmed via `git status`/`git diff --stat`; only the 18 files listed in Section 5 were touched, and the one duplicate-tree file modified (`argus/tests/test_bootstrap.py`) was explicitly authorized by this package's own Repository Rules.
+- ✓ **No unintended repository modifications** — confirmed via `git status`/`git diff --stat`; only the 18 files listed in Section 5 were touched, and the one duplicate-tree file modified (`argus/tests/test_bootstrap.py`) was explicitly authorized by the standing Repository Rule.
 
 ## 13. Concise Implementation Summary
 
-Package 011 adds `argus/conversation/`: an immutable `ConversationSession`/`ConversationMessage` model, `ConversationState`/`ConversationRole` enums, and a `ConversationManager` that tracks one active session, records message history, and processes each `receive()` call by delegating classification to `IIntentRouter.parse()` and (when a caller-supplied `workflow_id` is registered) execution to `IWorkflowEngine.execute()` - never doing either itself, verified structurally by test. Responses are template-based, never AI-generated. `IConversationManager` inherits `IService`, with `receive()` genuinely gated on `RUNNING` - a fourth data point reinforcing ADR-0002's pattern (kept `Proposed`, unchanged). Registered as ArgusOS's eleventh core service. 487 tests pass in `tests/` (71 new), 97%/100% coverage on `argus/conversation/` modules (100% on `manager.py` itself after removing one provably-dead defensive branch). Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, per instruction.
+Package 012 adds `argus/dispatcher/`: an `Action` abstract base class (one method, `execute()`) with `WorkflowAction` as Version 1's sole concrete implementation, a pure-data `DEFAULT_WORKFLOW_IDS` mapping table, and an `IntentDispatcher` that maintains a configurable `IntentType -> Action` registry and resolves+delegates via `dispatch()` — never parsing intents, never running workflow steps, never reasoning, verified structurally by test. `IntentDispatcher` deliberately does not depend on `IWorkflowEngine` directly; that dependency lives entirely inside whichever `WorkflowAction` instances `bootstrap.py` constructs and registers, making the "future Action types without redesigning the dispatcher" requirement literally true. `IIntentDispatcher` inherits `IService`, with `dispatch()` genuinely gated on `RUNNING` — a fifth data point reinforcing ADR-0002's pattern (kept `Proposed`, unchanged). Registered as ArgusOS's twelfth core service. 553 tests pass in `tests/` (66 new), 99%/98% coverage on `argus/dispatcher/`/full `argus/*`. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
 
 ## 14. Architectural Observations
 
-- Four packages in a row (Scheduler, IntentRouter, WorkflowEngine, ConversationManager) have now independently implemented `IService`, and three of the four converge on the identical shape: one gated "do real work" method, N ungated registry methods. This is a strong, stable enough pattern that a future ADR-0002 resolution package could reasonably codify it as a required shape for any future `IService` adopter, not just a documented tendency.
-- This package is the first to depend on *two* other core services' interfaces directly (`IIntentRouter` and `IWorkflowEngine`), constructed and injected in `bootstrap.py` exactly like every single-dependency service before it. The DI pattern scaled to two dependencies with no changes needed to `Container` or `bootstrap.py`'s overall shape - worth noting as a confirmation that the dependency injection design from Package 002 continues to hold under increasing cross-service coordination, which is precisely what this package (and presumably future ones) needs more of.
-- `receive()`'s `workflow_id` parameter is a caller-supplied pointer, not something ConversationManager derives from the Intent itself. If a future package wants "the right workflow runs automatically based on what the user said," that mapping needs a home - it does not belong in ConversationManager (per this package's own Non-Goals) or in IntentRouter (per Package 009's routing-not-invoking design) or in WorkflowEngine (which is intentionally ignorant of what registers its workflows). This is a real, currently-unowned architectural gap worth flagging for whichever future package is expected to close it.
+- Five packages in a row (Scheduler, IntentRouter, WorkflowEngine, ConversationManager, IntentDispatcher) have now independently implemented `IService`, and four of the five converge on the identical shape: one gated "do real work" method, N ungated registry methods. The pattern is stable enough across five independently-specified packages that a future ADR-0002 resolution package could reasonably codify it as a required shape, not just a documented tendency.
+- This package demonstrates a different DI shape than every prior core service: instead of taking another core service's interface directly (the pattern `ConversationManager` set with `IIntentRouter`/`IWorkflowEngine`), `IntentDispatcher` takes only generic `Action` objects, and the concrete cross-service dependency is pushed one level down, into `WorkflowAction`, constructed exclusively by `bootstrap.py`. This is worth flagging as a second valid DI shape now proven out in this codebase — "depend on the service directly" (Package 011) versus "depend on an abstraction the caller configures with the service" (Package 012) — both work cleanly with the existing `Container`, and future packages needing extensibility across multiple possible backends now have a concrete precedent to follow instead of defaulting to direct dependency by habit.
+- `IntentDispatcher` and `ConversationManager` are not wired together by this package — both exist, both can independently produce or consume an `Intent`, but no core service currently owns "take a raw user message all the way through classification, dispatch, and execution automatically." `tests/test_intent_dispatcher.py`'s `ConversationManagerIntegrationTests` proves the composition is *possible* end-to-end, not that it's automatic. This is the same "currently-unowned architectural gap" Package 011's own report flagged for whichever future package would need to close it — Package 012 narrows that gap (dispatch now exists) without closing it (nothing calls dispatch automatically yet), worth flagging again for whichever future package is expected to finish the wiring.

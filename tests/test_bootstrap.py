@@ -6,6 +6,7 @@ from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
+from argus.dispatcher import IIntentDispatcher, IntentDispatcher
 from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
@@ -26,6 +27,7 @@ CORE_SERVICE_NAMES = (
     "intent_router",
     "workflow_engine",
     "conversation_manager",
+    "intent_dispatcher",
 )
 
 
@@ -143,6 +145,34 @@ class BootstrapTests(unittest.TestCase):
             conversation_manager = application.container.resolve("conversation_manager")
             self.assertIsInstance(conversation_manager, IConversationManager)
             self.assertIsInstance(conversation_manager, ConversationManager)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_intent_dispatcher_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("intent_dispatcher"))
+            intent_dispatcher = application.container.resolve("intent_dispatcher")
+            self.assertIsInstance(intent_dispatcher, IIntentDispatcher)
+            self.assertIsInstance(intent_dispatcher, IntentDispatcher)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_intent_dispatcher_has_initial_mappings(self):
+        from argus.intent import IntentType
+
+        application = bootstrap()
+
+        try:
+            intent_dispatcher = application.container.resolve("intent_dispatcher")
+            mappings = intent_dispatcher.list_mappings()
+            for intent_type in IntentType:
+                self.assertIn(
+                    intent_type,
+                    mappings,
+                    msg=f"{intent_type.name} has no initial mapping registered",
+                )
         finally:
             application.shutdown()
 
