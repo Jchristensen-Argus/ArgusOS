@@ -631,3 +631,36 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Plugin discovery is registration-only in Version 1: no filesystem/entry-point scanning, no dynamic import machinery. A caller must construct and register every `Plugin` explicitly.
 - Plugins do not execute anything - there is no `Plugin.activate()` and no relationship between a `Plugin` and any `Action`/`WorkflowAction` beyond the `exported_capabilities` data link.
 - `list_exported_capabilities()`'s Capabilities are not automatically registered with the Capability Registry - `PluginManager` only exposes them; a caller decides whether and how to register any of them.
+
+## Package 015 - Planner
+
+### Added
+
+- Added `argus/planner/` package (Package 015 - Planner):
+  - `plan.py` - `PlanStatus` (an enum: `CREATED`, `VALIDATED`, `READY`, `FAILED`, `COMPLETED` - only the first three are ever produced by Version 1) and `Plan`, an immutable dataclass describing one Execution Plan: `originating_intent`, `id` (auto-generated), `status` (default `CREATED`), `created_at` (auto-generated), `steps`, `metadata`. Pure data - holds no live service reference and does not validate its own fields.
+  - `step.py` - `PlanStep`, an immutable dataclass describing one ordered unit of work: `description`, `required_capability` (a capability id string), `id` (auto-generated), `order` (maintained exclusively by `Planner`), `optional` (default `False`), `metadata`.
+  - `interfaces.py` - `IPlanner`, a plain `ABC` (deliberately NOT inheriting `IService` - see the ADR Update below): `create_plan`, `add_step`, `remove_step`, `reorder_steps`, `validate_plan`, `get_plan`, `list_plans`.
+  - `planner.py` - `Planner`: an in-memory registry of `Plan` objects keyed by id. Every mutation constructs a new `Plan` (and, where steps change, new `PlanStep`s with recomputed `order` fields) via `dataclasses.replace`. Any structural mutation (`add_step`/`remove_step`/`reorder_steps`) resets a Plan's status to `CREATED`, since a prior `VALIDATED`/`FAILED` status no longer reflects the current steps. `validate_plan()` checks only that every non-optional `PlanStep`'s `required_capability` is registered with the injected `ICapabilityRegistry` (via `contains()` - never invoking it); on success, publishes `PlanValidated` and sets `status=VALIDATED`; on failure, sets `status=FAILED`, persists it, and raises `PlanValidationError` without publishing anything. Publishes `PlanCreated`/`PlanUpdated` on successful `create_plan()`/step-mutations respectively.
+  - `exceptions.py` - `PlannerError`, `InvalidPlanError`, `PlanNotFoundError`, `StepNotFoundError`, `PlanValidationError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/015_PLANNER.md`, including a note that no `design/specifications/PLANNER.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009, 010, 011, 012, 013, and 014).
+- Extended `argus/events/event_types.py`'s `EventType` with three new members: `PLAN_CREATED`, `PLAN_UPDATED`, `PLAN_VALIDATED`. `PLAN_REMOVED` (a work-order example) was deliberately not added - this package has no "delete an entire Plan" operation for it to correspond to; step-level removal is covered by `PLAN_UPDATED`'s `"change"` payload field instead.
+- Added `tests/test_step.py` (13 new tests: the `PlanStep` model), `tests/test_plan.py` (17 new tests: the `Plan`/`PlanStatus` model), `tests/test_planner.py` (52 new tests: `Planner`).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Planner resolves from the Container, has no plans initially, and can validate a Plan against a real capability id already registered with the Capability Registry.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"planner"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `Planner` (depends on the Event Bus and the Capability Registry) immediately after the Intent Dispatcher, and registers it in the Container as `"planner"`. Construction order reflects dependency order (Planner needs a live `ICapabilityRegistry`), not the target architecture diagram's own top-to-bottom position (which places Planner above Intent and the Capability Registry) - the same distinction already drawn for Capability Registry/Intent Dispatcher in Package 013. Bootstrap order is now ... -> Capability Registry -> Plugin Manager -> Intent Dispatcher -> Planner -> Register Core Services -> Application. `_register_core_services` now registers fifteen core services. `CORE_SERVICES_VERSION` remains `"0.1.4"` - unchanged by this package, per its own explicit Version Policy.
+- `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, and `argus/plugins/` are unchanged - the Planner's only touchpoint with any of them is a read-only `ICapabilityRegistry.contains()` call inside `validate_plan()`.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `Planner` is the third consecutive new *non*-adopter of `IService`, following Capability Registry (013) and Plugin Manager (014) - even `validate_plan()`, the closest thing to "real work" any non-adopter has done so far, remains a single synchronous operation with no phase distinct from any other method call. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- `PlanStatus.READY` and `PlanStatus.COMPLETED` are never produced by any Version 1 Planner method - reserved for a future dispatch-integration and completion-reporting package.
+- `validate_plan()` checks capability-id existence only - it does not check a matching Capability's `enabled` flag or whether it actually supports the Plan's originating Intent's `IntentType`.
+- The Planner is not wired to the Capability Registry/Dispatcher path in any direction beyond its one read-only check - nothing automatically creates a Plan from a resolved Intent, and nothing consumes a validated Plan to dispatch it.
+- Plans are held only in memory; nothing persists across process restarts.

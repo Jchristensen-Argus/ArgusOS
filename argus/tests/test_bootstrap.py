@@ -25,6 +25,7 @@ CORE_SERVICE_NAMES = (
     "capability_registry",
     "intent_dispatcher",
     "plugin_manager",
+    "planner",
 )
 
 

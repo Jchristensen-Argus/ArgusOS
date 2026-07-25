@@ -12,6 +12,7 @@ from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
 from argus.memory import IMemoryService, MemoryService
+from argus.planner import IPlanner, Planner, PlanStatus
 from argus.plugins import IPluginManager, PluginManager
 from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
@@ -32,6 +33,7 @@ CORE_SERVICE_NAMES = (
     "capability_registry",
     "intent_dispatcher",
     "plugin_manager",
+    "planner",
 )
 
 
@@ -240,6 +242,49 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(set(c.id for c in registry_capabilities), set(c.id for c in exported_capabilities))
             for capability in exported_capabilities:
                 self.assertIs(capability_registry.get(capability.id), capability)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_planner_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("planner"))
+            planner = application.container.resolve("planner")
+            self.assertIsInstance(planner, IPlanner)
+            self.assertIsInstance(planner, Planner)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_planner_has_no_plans_initially(self):
+        application = bootstrap()
+
+        try:
+            planner = application.container.resolve("planner")
+            self.assertEqual(planner.list_plans(), ())
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_planner_validates_plan_against_capability_registry(self):
+        from argus.intent import Intent, IntentType
+
+        application = bootstrap()
+
+        try:
+            planner = application.container.resolve("planner")
+            capability_registry = application.container.resolve("capability_registry")
+            existing_capability = capability_registry.list_capabilities()[0]
+
+            plan = planner.create_plan(Intent(name=IntentType.QUESTION, confidence=1.0))
+            plan = planner.add_step(
+                plan.id,
+                description="Use an existing capability",
+                required_capability=existing_capability.id,
+            )
+
+            validated = planner.validate_plan(plan.id)
+
+            self.assertEqual(validated.status, PlanStatus.VALIDATED)
         finally:
             application.shutdown()
 

@@ -1,0 +1,242 @@
+"""
+Planner: in-memory, reasoning-only implementation of IPlanner for the
+ArgusOS Planner.
+
+Purpose:
+    Implement IPlanner: convert an Intent into an ordered Execution
+    Plan, and let callers inspect, mutate, and validate it, per
+    factory/packages/015_PLANNER.md. The Planner performs reasoning
+    only - it never executes a workflow, never dispatches an action,
+    and never calls a plugin. Execution remains entirely outside this
+    package, per this package's explicit Objective.
+
+Responsibilities:
+    - create_plan / add_step / remove_step / reorder_steps /
+      validate_plan / get_plan / list_plans: an in-memory registry of
+      Plan objects, keyed by id. All seven methods are always
+      available - Planner is not an IService adopter (see
+      argus/planner/interfaces.py's Architectural Note), so there is
+      no lifecycle state to gate any of them on.
+    - Every mutation constructs a new Plan (and, where steps change,
+      new PlanStep instances with recomputed `order` fields) via
+      dataclasses.replace, and stores it under the same id - Plan and
+      PlanStep are both frozen, matching the precedent set by
+      WorkflowEngine's own treatment of Workflow (Package 010) and
+      PluginManager's treatment of Plugin (Package 014): mutation
+      happens by replacement, never by attribute assignment.
+    - Any structural mutation (add_step(), remove_step(),
+      reorder_steps()) resets the Plan's status to
+      PlanStatus.CREATED, even if it was previously VALIDATED or
+      FAILED. This is a deliberate business rule, not specified
+      verbatim by the work order: a Plan's VALIDATED/FAILED status
+      describes whether its *current* steps were last confirmed
+      against the Capability Registry, so changing those steps
+      without re-validating would let a stale, no-longer-accurate
+      status persist. Re-running validate_plan() is always required
+      after any structural change.
+    - validate_plan() checks only that every non-optional PlanStep's
+      required_capability is currently registered with the injected
+      ICapabilityRegistry (via `contains()`) - it never calls `get()`,
+      never inspects a Capability's own `enabled` flag, and never
+      invokes anything the Capability Registry describes. A Plan with
+      no steps validates successfully (vacuously true).
+
+Capability Integration:
+    The one and only touchpoint with the Capability Registry is
+    validate_plan()'s read-only `ICapabilityRegistry.contains()` call.
+    Planner never calls `register()`, `unregister()`, `get()`, or
+    `find_by_intent_type()` - it only asks "does a Capability with
+    this id currently exist?" and never constructs, obtains, or
+    invokes one. No change was made to argus/capability/ to support
+    this - `contains()` already existed, unchanged, since Package 013.
+
+Non-Responsibilities:
+    - Planner never executes a Plan, never dispatches an Intent, and
+      never calls a plugin - it has no dependency on
+      argus.dispatcher, argus.workflow, or argus.plugins anywhere in
+      this module, per this package's explicit Objective and Plugin
+      Integration guidance ("The Planner should remain completely
+      unaware of plugins").
+    - Planner does not optimize plans (no reordering heuristic, no
+      redundant-step detection) and does not schedule plans (no
+      timing, no recurrence) - both explicitly out of Version 1
+      scope, reserved for future packages.
+    - No AI, no LLM, no networking, no persistence - Plans are held
+      only in memory, exactly like CapabilityRegistry's Capabilities
+      and PluginManager's Plugins.
+
+Dependencies:
+    argus.planner (Plan, PlanStatus, PlanStep, IPlanner, and the
+    planner exceptions), argus.capability.interfaces (ICapabilityRegistry,
+    for validate_plan()'s read-only existence check only),
+    argus.intent.intent (Intent), argus.events (Event, EventType,
+    IEventBus).
+"""
+
+import dataclasses
+from typing import Dict, List, Optional, Sequence
+
+from argus.capability.interfaces import ICapabilityRegistry
+from argus.events.event import Event
+from argus.events.event_types import EventType
+from argus.events.interfaces import IEventBus
+from argus.intent.intent import Intent
+from argus.planner.exceptions import (
+    InvalidPlanError,
+    PlanNotFoundError,
+    PlanValidationError,
+    StepNotFoundError,
+)
+from argus.planner.interfaces import IPlanner
+from argus.planner.plan import Plan, PlanStatus
+from argus.planner.step import PlanStep
+
+
+class Planner(IPlanner):
+    """
+    In-memory implementation of IPlanner.
+
+    Purpose:
+        Be the sole place ArgusOS converts an Intent into an ordered,
+        inspectable Execution Plan, as reasoning only - no execution,
+        no dispatch, no plugin awareness. See the module docstring for
+        the full design rationale.
+
+    Dependencies:
+        An IEventBus implementation and an ICapabilityRegistry
+        implementation, both injected by the caller (bootstrap.py).
+    """
+
+    def __init__(self, event_bus: IEventBus, capability_registry: ICapabilityRegistry) -> None:
+        self._event_bus = event_bus
+        self._capability_registry = capability_registry
+        self._plans: Dict[str, Plan] = {}
+
+    def create_plan(self, intent: Intent, *, metadata: Optional[dict] = None) -> Plan:
+        if not isinstance(intent, Intent):
+            raise InvalidPlanError(f"create_plan() requires an Intent, got {intent!r}.")
+        plan = Plan(originating_intent=intent, metadata=metadata or {})
+        self._plans[plan.id] = plan
+        self._publish(EventType.PLAN_CREATED, {"plan_id": plan.id})
+        return plan
+
+    def add_step(
+        self,
+        plan_id: str,
+        *,
+        description: str,
+        required_capability: str,
+        optional: bool = False,
+        metadata: Optional[dict] = None,
+    ) -> Plan:
+        plan = self._require_plan(plan_id)
+        if not isinstance(description, str) or not description:
+            raise InvalidPlanError("PlanStep.description must be a non-empty string.")
+        if not isinstance(required_capability, str) or not required_capability:
+            raise InvalidPlanError(
+                "PlanStep.required_capability must be a non-empty string."
+            )
+        step = PlanStep(
+            description=description,
+            required_capability=required_capability,
+            order=len(plan.steps),
+            optional=optional,
+            metadata=metadata or {},
+        )
+        updated = dataclasses.replace(
+            plan, steps=plan.steps + (step,), status=PlanStatus.CREATED
+        )
+        self._plans[plan_id] = updated
+        self._publish(
+            EventType.PLAN_UPDATED,
+            {"plan_id": plan_id, "change": "added_step", "step_id": step.id},
+        )
+        return updated
+
+    def remove_step(self, plan_id: str, step_id: str) -> Plan:
+        plan = self._require_plan(plan_id)
+        if not isinstance(step_id, str):
+            raise InvalidPlanError(f"step_id must be a string, got {step_id!r}.")
+        if not any(step.id == step_id for step in plan.steps):
+            raise StepNotFoundError(
+                f"No step with id {step_id!r} in plan {plan_id!r}."
+            )
+        remaining = [step for step in plan.steps if step.id != step_id]
+        renumbered = tuple(
+            dataclasses.replace(step, order=index)
+            for index, step in enumerate(remaining)
+        )
+        updated = dataclasses.replace(plan, steps=renumbered, status=PlanStatus.CREATED)
+        self._plans[plan_id] = updated
+        self._publish(
+            EventType.PLAN_UPDATED,
+            {"plan_id": plan_id, "change": "removed_step", "step_id": step_id},
+        )
+        return updated
+
+    def reorder_steps(self, plan_id: str, step_ids: Sequence[str]) -> Plan:
+        plan = self._require_plan(plan_id)
+        by_id = {step.id: step for step in plan.steps}
+        candidate: List[str] = list(step_ids) if isinstance(step_ids, (list, tuple)) else []
+        if (
+            not isinstance(step_ids, (list, tuple))
+            or len(candidate) != len(by_id)
+            or len(set(candidate)) != len(candidate)
+            or set(candidate) != set(by_id.keys())
+        ):
+            raise InvalidPlanError(
+                "reorder_steps() requires step_ids to be an exact permutation of "
+                "the plan's current step ids."
+            )
+        reordered = tuple(
+            dataclasses.replace(by_id[step_id], order=index)
+            for index, step_id in enumerate(candidate)
+        )
+        updated = dataclasses.replace(plan, steps=reordered, status=PlanStatus.CREATED)
+        self._plans[plan_id] = updated
+        self._publish(
+            EventType.PLAN_UPDATED, {"plan_id": plan_id, "change": "reordered"}
+        )
+        return updated
+
+    def validate_plan(self, plan_id: str) -> Plan:
+        plan = self._require_plan(plan_id)
+        missing = [
+            step
+            for step in plan.steps
+            if not step.optional
+            and not self._capability_registry.contains(step.required_capability)
+        ]
+        if missing:
+            failed = dataclasses.replace(plan, status=PlanStatus.FAILED)
+            self._plans[plan_id] = failed
+            missing_ids = [step.required_capability for step in missing]
+            raise PlanValidationError(
+                f"Plan {plan_id!r} failed validation: required capability id(s) "
+                f"{missing_ids!r} are not registered with the Capability Registry."
+            )
+        validated = dataclasses.replace(plan, status=PlanStatus.VALIDATED)
+        self._plans[plan_id] = validated
+        self._publish(EventType.PLAN_VALIDATED, {"plan_id": plan_id})
+        return validated
+
+    def get_plan(self, plan_id: str) -> Plan:
+        return self._require_plan(plan_id)
+
+    def list_plans(self) -> Sequence[Plan]:
+        return tuple(self._plans.values())
+
+    # -- internals ------------------------------------------------------
+
+    def _require_plan(self, plan_id: str) -> Plan:
+        if not isinstance(plan_id, str):
+            raise InvalidPlanError(f"plan_id must be a string, got {plan_id!r}.")
+        try:
+            return self._plans[plan_id]
+        except KeyError:
+            raise PlanNotFoundError(f"No plan registered with id {plan_id!r}.") from None
+
+    def _publish(self, event_type: EventType, payload: dict) -> None:
+        self._event_bus.publish(
+            Event(type=event_type, source="planner", payload=payload)
+        )

@@ -430,3 +430,56 @@ by pattern-matching on naming alone rather than on actual phased
 behavior. This ADR's Status remains `Proposed`, per standing
 instruction; only the Founder/Architect elevates it to `Accepted` or
 opens the follow-up package.
+
+## Empirical Finding (Package 015 - Planner)
+
+`IPlanner`, per the Founder's Package 015 work order, does NOT
+inherit `IService` - the third consecutive new core service, following
+Capability Registry (013) and Plugin Manager (014), to deliberately
+abstain from adopting it. `Planner` is a pure reasoning-only store:
+`create_plan`, `add_step`, `remove_step`, `reorder_steps`,
+`validate_plan`, `get_plan`, and `list_plans` are all fully usable the
+instant the Planner is constructed, with no background thread, no
+connection to open or close, and nothing for `start()`/`stop()` to
+meaningfully enable or disable - architecturally identical to
+Knowledge Service (006), Memory Service (007), Capability Registry
+(013), and Plugin Manager (014).
+
+This package sharpens the criterion's discriminating power one step
+further than Package 014's finding did. Planner's methods are not
+just individually stateless in the way Capability Registry's are -
+`validate_plan()` performs the closest thing to "real work" of any
+non-adopter so far (a Capability Registry lookup and a status
+transition), yet it remains a single, synchronous, fully-available-
+at-construction-time operation with no phase distinct from any other
+method call. Nothing about it resembles `Scheduler.tick()`'s or
+`WorkflowEngine.execute()`'s gate on the owning service's own
+`RUNNING` state - there is no "Planner must be started before
+validate_plan() will work" precondition anywhere in this design, nor
+could there sensibly be one, since the work order's own Objective
+("It performs reasoning only") rules out anything resembling a
+background process by construction, not just by current
+implementation choice.
+
+Three consecutive new-service non-adoptions are now on record, each
+correctly predicted by the criterion during design rather than
+discovered after the fact. Ten core services now exist that do not
+implement `IService` (Configuration, the Logger, the Event Bus, the
+Service Registry, the Lifecycle Manager, Knowledge Service, Memory
+Service, Capability Registry, Plugin Manager, and now Planner),
+alongside five that do (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, and IntentDispatcher - four of which are
+genuinely gated).
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted for the
+five existing adopters. Three consecutive non-adoptions - twice the
+length of the current adopter-side gated/ungated pattern's own
+longest unbroken streak - make it increasingly clear that ArgusOS's
+architecture is naturally splitting into two durable categories:
+metadata/reasoning stores (now the majority of core services) and a
+small, stable set of genuinely phased engines identified early
+(Scheduler, WorkflowEngine, ConversationManager, IntentDispatcher).
+This ADR's Status remains `Proposed`, per standing instruction; only
+the Founder/Architect elevates it to `Accepted` or opens the
+follow-up package.

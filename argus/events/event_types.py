@@ -179,3 +179,26 @@ class EventType(Enum):
     PLUGIN_UNREGISTERED = "plugin_unregistered"
     PLUGIN_ENABLED = "plugin_enabled"
     PLUGIN_DISABLED = "plugin_disabled"
+
+    # Added by Package 015 - Planner, per this module's own "single
+    # place new event types are added" scope note above. Planner
+    # publishes these on the existing Event Bus (see
+    # argus/planner/planner.py). PLAN_CREATED fires once per
+    # successful create_plan() call. PLAN_UPDATED fires once per
+    # successful add_step()/remove_step()/reorder_steps() call - its
+    # payload's "change" field distinguishes which
+    # ("added_step"/"removed_step"/"reordered"), rather than three
+    # separate event types for what is, from any subscriber's
+    # perspective, the same underlying signal: "this Plan's steps
+    # changed." PLAN_VALIDATED fires only when validate_plan()
+    # succeeds (every non-optional step's required_capability is
+    # registered) - a failed validate_plan() call raises
+    # PlanValidationError instead and publishes nothing, matching
+    # CapabilityRegistry.register()'s and PluginManager.register()'s
+    # identical "failure raises, does not publish" precedent. No
+    # PLAN_REMOVED event exists: this package has no "delete an
+    # entire Plan" operation for it to correspond to - only
+    # step-level removal, already covered by PLAN_UPDATED.
+    PLAN_CREATED = "plan_created"
+    PLAN_UPDATED = "plan_updated"
+    PLAN_VALIDATED = "plan_validated"
