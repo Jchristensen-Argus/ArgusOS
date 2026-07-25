@@ -21,6 +21,7 @@ CORE_SERVICE_NAMES = (
     "scheduler",
     "intent_router",
     "workflow_engine",
+    "conversation_manager",
 )
 
 

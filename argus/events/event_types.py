@@ -100,3 +100,25 @@ class EventType(Enum):
     WORKFLOW_COMPLETED = "workflow_completed"
     WORKFLOW_FAILED = "workflow_failed"
     WORKFLOW_CANCELLED = "workflow_cancelled"
+
+    # Added by Package 011 - Conversation Manager, per this module's
+    # own "single place new event types are added" scope note above.
+    # ConversationManager publishes these on the existing Event Bus
+    # (see argus/conversation/manager.py). CONVERSATION_STARTED and
+    # CONVERSATION_ENDED bracket a session's lifetime.
+    # MESSAGE_RECEIVED fires once per receive() call, right after the
+    # user's message is appended to history. INTENT_RESOLVED fires
+    # after IIntentRouter.parse() returns (delegated classification,
+    # not performed by ConversationManager itself). WORKFLOW_EXECUTED
+    # fires only when receive() was given a workflow_id that the
+    # Workflow Engine successfully executed (delegated execution, not
+    # performed by ConversationManager itself) - it does not fire if
+    # no workflow_id was supplied or the delegated execute() call
+    # failed. RESPONSE_GENERATED fires once per receive() call, right
+    # after the assistant's reply is appended to history.
+    CONVERSATION_STARTED = "conversation_started"
+    MESSAGE_RECEIVED = "message_received"
+    INTENT_RESOLVED = "intent_resolved"
+    WORKFLOW_EXECUTED = "workflow_executed"
+    RESPONSE_GENERATED = "response_generated"
+    CONVERSATION_ENDED = "conversation_ended"

@@ -5,6 +5,7 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.events import IEventBus, InMemoryEventBus
+from argus.conversation import IConversationManager, ConversationManager
 from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, KnowledgeService
 from argus.lifecycle import LifecycleManager, LifecycleState
@@ -24,6 +25,7 @@ CORE_SERVICE_NAMES = (
     "scheduler",
     "intent_router",
     "workflow_engine",
+    "conversation_manager",
 )
 
 
@@ -130,6 +132,17 @@ class BootstrapTests(unittest.TestCase):
             workflow_engine = application.container.resolve("workflow_engine")
             self.assertIsInstance(workflow_engine, IWorkflowEngine)
             self.assertIsInstance(workflow_engine, WorkflowEngine)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_conversation_manager_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("conversation_manager"))
+            conversation_manager = application.container.resolve("conversation_manager")
+            self.assertIsInstance(conversation_manager, IConversationManager)
+            self.assertIsInstance(conversation_manager, ConversationManager)
         finally:
             application.shutdown()
 

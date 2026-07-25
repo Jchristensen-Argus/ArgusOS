@@ -497,3 +497,37 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Workflows are held only in memory; nothing persists across process restarts.
 - A step's action is an opaque callable with no declared input/output schema beyond "receives a context mapping, returns a context mapping" - the engine cannot validate a step's contract beyond checking it is callable.
 - `cancel()` only succeeds against a `PENDING` workflow; since `execute()` is fully synchronous, a workflow is never observably `RUNNING` to an external caller, making mid-execution cancellation structurally impossible in this version (by design, per the work order's "no threading, no background execution").
+
+## Package 011 - Conversation Manager
+
+### Added
+
+- Added `argus/conversation/` package (Package 011 - Conversation Manager):
+  - `state.py` - `ConversationState` (`NEW`/`ACTIVE`/`WAITING`/`CLOSED`).
+  - `message.py` - `ConversationRole` (`USER`/`ASSISTANT`/`SYSTEM`) and `ConversationMessage`, an immutable dataclass (`id`, `timestamp`, `role`, `content`, `metadata`).
+  - `session.py` - `ConversationSession`, an immutable dataclass (`id`, `created_at`, `updated_at`, `state`, `metadata`, `messages`).
+  - `interfaces.py` - `IConversationManager`, inheriting `IService` (`start_session`, `end_session`, `receive`, `history`, `active_session`, plus the inherited `initialize`/`start`/`stop`/`status`).
+  - `manager.py` - `ConversationManager`: in-memory session registry (one active session at a time in v1); `receive()` appends the user message, delegates classification to `IIntentRouter.parse()`, optionally delegates execution to `IWorkflowEngine.execute()` when a `workflow_id` is supplied and registered, generates a deterministic templated response keyed on the resolved intent, and appends the assistant message - never performs AI reasoning, never parses intents itself, never executes workflow steps itself.
+  - `exceptions.py` - `ConversationError`, `NoActiveSessionError`, `SessionNotFoundError`, `ActiveSessionExistsError`, `InvalidMessageError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/011_CONVERSATION_MANAGER.md`, including a note that no `design/specifications/CONVERSATION.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009, and 010).
+- Extended `argus/events/event_types.py`'s `EventType` with six new members: `CONVERSATION_STARTED`, `MESSAGE_RECEIVED`, `INTENT_RESOLVED`, `WORKFLOW_EXECUTED`, `RESPONSE_GENERATED`, `CONVERSATION_ENDED`.
+- Added `tests/test_conversation.py` (21 new tests), `tests/test_conversation_manager.py` (49 new tests).
+- Extended `tests/test_bootstrap.py` with a test confirming the Conversation Manager resolves from the Container (1 new test).
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"conversation_manager"` to its `CORE_SERVICE_NAMES` tuple only, per the Founder's explicit instruction to keep both bootstrap registration tests synchronized whenever a new core service is added. No other line in that file, and no other duplicate-tree file, was touched.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `ConversationManager` (depends on the Event Bus, the Intent Router, and the Workflow Engine) immediately after the Workflow Engine, and registers it in the Container as `"conversation_manager"`. Bootstrap order is now ... -> Workflow Engine -> Conversation Manager -> Register Core Services -> Application. `_register_core_services` now registers eleven core services. `CORE_SERVICES_VERSION` remains `"0.1.0"` - per the Founder's standing policy, this constant always reflects the repository's last actual release (git tag + committed history), not the package currently being implemented; it advances only after Package 011 is integrated, validated, committed, and tagged, which has not yet happened. An initial delivery of this package mistakenly bumped it to `"0.1.1"` during implementation; corrected back to `"0.1.0"` per the Founder's explicit instruction - see `IMPLEMENTATION_REPORT.md`. ConversationManager's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same reasoning already applied to Scheduler, IntentRouter, and WorkflowEngine.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. ConversationManager is a fourth `IService` adopter, appended as a further empirical data point: its `receive()` is genuinely gated on lifecycle state, reinforcing the pattern set by Scheduler and WorkflowEngine - three of four real adopters to date use `IService` for a genuine behavioral gate. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- Response generation is a small, fixed set of deterministic templates keyed on the resolved Intent's name - not natural language generation.
+- No automatic mapping from a resolved Intent to a workflow_id; the caller of `receive()` must supply `workflow_id` explicitly for execution to be delegated.
+- Exactly one active session at a time (Version 1 constraint); starting a second session while one is active raises `ActiveSessionExistsError`.
+- Sessions and messages are held only in memory; nothing persists across process restarts.
+- `receive()` does not call `IIntentRouter.route()` or `register_handler()` - only `parse()`'s direct return value is used, so other Event Bus subscribers to `IntentRouted` are not triggered by a conversation turn.

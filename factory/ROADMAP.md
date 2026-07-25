@@ -19,6 +19,7 @@
 - [x] Scheduler Service (ScheduledTask, Trigger/OneShotTrigger/IntervalTrigger/DailyTrigger, IScheduler(IService), Scheduler, Package 008)
 - [x] Intent Router (Intent/IntentType, parse_text, IIntentRouter(IService), IntentRouter, Package 009)
 - [x] Workflow Engine (Workflow/WorkflowStep, WorkflowState, IWorkflowEngine(IService), WorkflowEngine, Package 010)
+- [x] Conversation Manager (ConversationSession/ConversationMessage, ConversationState, IConversationManager(IService), ConversationManager, Package 011)
 
 ---
 

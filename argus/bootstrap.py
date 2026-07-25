@@ -10,8 +10,9 @@ Purpose:
     factory/packages/006_KNOWLEDGE_SERVICE.md,
     factory/packages/007_MEMORY_SERVICE.md,
     factory/packages/008_SCHEDULER_SERVICE.md,
-    factory/packages/009_INTENT_ROUTER.md, and
-    factory/packages/010_WORKFLOW_ENGINE.md.
+    factory/packages/009_INTENT_ROUTER.md,
+    factory/packages/010_WORKFLOW_ENGINE.md, and
+    factory/packages/011_CONVERSATION_MANAGER.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -82,24 +83,36 @@ Startup Sequence:
         scheduler.initialize()/start() before it will run anything.
         Bootstrap does not do this itself, for the same reason it
         does not for Scheduler.
-    12. Register the ten core services (Configuration, Logger, Event
-        Bus, Service Registry, Lifecycle Manager, Knowledge Service,
-        Memory Service, Scheduler, Intent Router, Workflow Engine) in
-        the Service Registry (identity/descriptive data only) and in
-        the Lifecycle Manager, where each enters
-        LifecycleState.REGISTERED. None of them are initialized or
-        started by this package.
-    13. Construct and start the Application.
+    12. Construct the Conversation Manager (depends on the Event Bus,
+        the Intent Router, and the Workflow Engine) and register it
+        with the Container, per Package 011. Bootstrap is the only
+        place that constructs ConversationManager directly; every
+        other subsystem must resolve it from the Container. Like
+        Scheduler and WorkflowEngine, ConversationManager implements
+        IService with a genuine gate: receive() requires the
+        manager's own state to be RUNNING, exactly as tick() and
+        execute() do. Registered only (LifecycleState.REGISTERED)
+        here, for the same divergence-avoidance reasoning recorded in
+        ADR-0002.
+    13. Register the eleven core services (Configuration, Logger,
+        Event Bus, Service Registry, Lifecycle Manager, Knowledge
+        Service, Memory Service, Scheduler, Intent Router, Workflow
+        Engine, Conversation Manager) in the Service Registry
+        (identity/descriptive data only) and in the Lifecycle Manager,
+        where each enters LifecycleState.REGISTERED. None of them are
+        initialized or started by this package.
+    14. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
     No engines (Atlas, Cortex, Hermes, Navigator, Sentinel) are
-    initialized here. Packages 003-010 register the Event Bus, Service
+    initialized here. Packages 003-011 register the Event Bus, Service
     Registry, Lifecycle Manager, Knowledge Service, Memory Service,
-    Scheduler, Intent Router, and Workflow Engine respectively but do
-    not change Application's lifecycle: no lifecycle events are
-    published, and no core service is initialized or started, by this
-    package (see the Package 005 engineering notes).
+    Scheduler, Intent Router, Workflow Engine, and Conversation
+    Manager respectively but do not change Application's lifecycle: no
+    lifecycle events are published, and no core service is initialized
+    or started, by this package (see the Package 005 engineering
+    notes).
 
 Architectural Revision (Package 005):
     ServiceDescriptor no longer carries a `state` field. Architecture
@@ -122,6 +135,7 @@ Dependencies:
 from argus.application import Application
 from argus.configuration import Configuration
 from argus.container import Container
+from argus.conversation import IConversationManager, ConversationManager
 from argus.events import IEventBus, InMemoryEventBus
 from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, JSONKnowledgeStorage, KnowledgeService
@@ -132,11 +146,17 @@ from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry, ServiceDescriptor
 
-# The ArgusOS release this package targets, per the Package 010 work
-# order header ("ArgusOS Version Target: v0.0.10"). Used as the
-# version recorded on every core ServiceDescriptor registered during
-# bootstrap.
-CORE_SERVICES_VERSION = "0.0.10"
+# The currently released ArgusOS version, per the Founder's standing
+# policy: this constant tracks the repository's last actual release
+# (git tag + committed history), not the package currently being
+# implemented. It advances only after a package has been integrated,
+# validated, committed, and tagged - never during a package's own
+# implementation. The repository's git tag scheme changed from
+# per-package "v0.0.N" to semantic versioning at Package 010 (tag
+# "v0.1.0"); this constant reflects that same released state while
+# Package 011 remains unintegrated. Used as the version recorded on
+# every core ServiceDescriptor registered during bootstrap.
+CORE_SERVICES_VERSION = "0.1.0"
 
 
 def bootstrap() -> Application:
@@ -180,6 +200,13 @@ def bootstrap() -> Application:
     workflow_engine = WorkflowEngine(event_bus=event_bus)
     container.register("workflow_engine", workflow_engine)
 
+    conversation_manager = ConversationManager(
+        event_bus=event_bus,
+        intent_router=intent_router,
+        workflow_engine=workflow_engine,
+    )
+    container.register("conversation_manager", conversation_manager)
+
     _register_core_services(
         service_registry=service_registry,
         lifecycle_manager=lifecycle_manager,
@@ -191,6 +218,7 @@ def bootstrap() -> Application:
         scheduler=scheduler,
         intent_router=intent_router,
         workflow_engine=workflow_engine,
+        conversation_manager=conversation_manager,
     )
 
     application = Application(container)
@@ -211,6 +239,7 @@ def _register_core_services(
     scheduler: IScheduler,
     intent_router: IIntentRouter,
     workflow_engine: IWorkflowEngine,
+    conversation_manager: IConversationManager,
 ) -> None:
     """
     Register the kernel's own core services with the Service Registry
@@ -218,20 +247,22 @@ def _register_core_services(
     (as amended by the Package 005 architectural revision), Package
     006's "KnowledgeService becomes a Core Service" requirement, and
     the equivalent requirement for the Memory Service (Package 007),
-    Scheduler (Package 008), the Intent Router (Package 009), and the
-    Workflow Engine (Package 010).
+    Scheduler (Package 008), the Intent Router (Package 009), the
+    Workflow Engine (Package 010), and the Conversation Manager
+    (Package 011).
 
     Each of Configuration, the Logger, the Event Bus, the Service
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
-    Service, Scheduler, the Intent Router, and the Workflow Engine is
-    recorded as a ServiceDescriptor (identity and descriptive data
-    only, no runtime state) in the Service Registry, and as a
-    LifecycleState.REGISTERED entry in the Lifecycle Manager, which is
-    the sole owner of runtime lifecycle state for the Lifecycle
-    Manager's own purposes. Neither initialize() nor start() is called
-    on the Lifecycle Manager for any of them here. Scheduler, the
-    Intent Router, and the Workflow Engine are the three classes among
-    these ten that actually implement IService (see ADR-0002), but
+    Service, Scheduler, the Intent Router, the Workflow Engine, and
+    the Conversation Manager is recorded as a ServiceDescriptor
+    (identity and descriptive data only, no runtime state) in the
+    Service Registry, and as a LifecycleState.REGISTERED entry in the
+    Lifecycle Manager, which is the sole owner of runtime lifecycle
+    state for the Lifecycle Manager's own purposes. Neither
+    initialize() nor start() is called on the Lifecycle Manager for
+    any of them here. Scheduler, the Intent Router, the Workflow
+    Engine, and the Conversation Manager are the four classes among
+    these eleven that actually implement IService (see ADR-0002), but
     this function still does not call any of their initialize()/
     start() directly - see the Startup Sequence note in this module's
     docstring for why exercising their real IService lifecycles during
@@ -250,6 +281,7 @@ def _register_core_services(
         scheduler: The Scheduler instance.
         intent_router: The Intent Router instance.
         workflow_engine: The Workflow Engine instance.
+        conversation_manager: The Conversation Manager instance.
     """
     core_services = (
         ("configuration", configuration, type(configuration)),
@@ -262,6 +294,7 @@ def _register_core_services(
         ("scheduler", scheduler, IScheduler),
         ("intent_router", intent_router, IIntentRouter),
         ("workflow_engine", workflow_engine, IWorkflowEngine),
+        ("conversation_manager", conversation_manager, IConversationManager),
     )
 
     for name, instance, interface in core_services:
