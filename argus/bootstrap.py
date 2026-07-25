@@ -146,17 +146,22 @@ from argus.scheduler import IScheduler, Scheduler
 from argus.workflow import IWorkflowEngine, WorkflowEngine
 from argus.services import IServiceRegistry, InMemoryServiceRegistry, ServiceDescriptor
 
-# The currently released ArgusOS version, per the Founder's standing
-# policy: this constant tracks the repository's last actual release
-# (git tag + committed history), not the package currently being
-# implemented. It advances only after a package has been integrated,
-# validated, committed, and tagged - never during a package's own
-# implementation. The repository's git tag scheme changed from
-# per-package "v0.0.N" to semantic versioning at Package 010 (tag
-# "v0.1.0"); this constant reflects that same released state while
-# Package 011 remains unintegrated. Used as the version recorded on
-# every core ServiceDescriptor registered during bootstrap.
-CORE_SERVICES_VERSION = "0.1.0"
+# The currently released ArgusOS version.
+#
+# This constant always matches the latest released Git tag and represents
+# the version of the repository currently checked into source control.
+#
+# It is NOT advanced during package implementation.
+#
+# It is updated only as part of the official release process after:
+#   • Integration
+#   • Full regression testing
+#   • Smoke testing
+#   • Git commit
+#   • Git tag
+#
+# Every core ServiceDescriptor registered during bootstrap uses this value.
+CORE_SERVICES_VERSION = "0.1.1"
 
 
 def bootstrap() -> Application:
