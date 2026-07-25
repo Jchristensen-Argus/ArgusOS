@@ -1,11 +1,18 @@
-"""Unit tests for argus.dispatcher.action (Action, WorkflowAction) and
-argus.dispatcher.mapping (DEFAULT_WORKFLOW_IDS)."""
+"""Unit tests for argus.dispatcher.action (Action, WorkflowAction,
+build_action_from_capability) and argus.dispatcher.mapping
+(DEFAULT_WORKFLOW_IDS)."""
 
 import logging
 import unittest
 from abc import ABC
 
-from argus.dispatcher import Action, InvalidActionError, WorkflowAction
+from argus.capability import Capability
+from argus.dispatcher import (
+    Action,
+    InvalidActionError,
+    WorkflowAction,
+    build_action_from_capability,
+)
 from argus.dispatcher.mapping import DEFAULT_WORKFLOW_IDS
 from argus.events import InMemoryEventBus
 from argus.intent import IntentType
@@ -162,3 +169,67 @@ class DefaultWorkflowIdsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BuildActionFromCapabilityTests(unittest.TestCase):
+    def test_builds_workflow_action_for_workflow_kind(self):
+        engine = _engine()
+        workflow = engine.register_workflow(
+            name="test", steps=[WorkflowStep("s", lambda ctx: {**ctx, "ran": True})]
+        )
+        capability = Capability(
+            name="Answer",
+            description="d",
+            intent_types=(IntentType.QUESTION,),
+            action_kind=WorkflowAction.kind,
+            workflow_id=workflow.id,
+        )
+
+        action = build_action_from_capability(capability, workflow_engine=engine)
+
+        self.assertIsInstance(action, WorkflowAction)
+        self.assertEqual(action.workflow_id, workflow.id)
+
+    def test_built_action_actually_executes(self):
+        engine = _engine()
+        workflow = engine.register_workflow(
+            name="test", steps=[WorkflowStep("s", lambda ctx: {**ctx, "ran": True})]
+        )
+        capability = Capability(
+            name="Answer",
+            description="d",
+            intent_types=(IntentType.QUESTION,),
+            action_kind=WorkflowAction.kind,
+            workflow_id=workflow.id,
+        )
+
+        action = build_action_from_capability(capability, workflow_engine=engine)
+
+        self.assertEqual(action.execute(), {"ran": True})
+
+    def test_unsupported_action_kind_raises_invalid_action_error(self):
+        capability = Capability(
+            name="Unsupported",
+            description="d",
+            intent_types=(IntentType.QUESTION,),
+            action_kind="plugin",
+        )
+
+        with self.assertRaises(InvalidActionError):
+            build_action_from_capability(capability, workflow_engine=_engine())
+
+    def test_propagates_workflow_action_construction_failure(self):
+        # capability.workflow_id is None here (action_kind="workflow"
+        # but no workflow_id) - CapabilityRegistry.register() would
+        # normally reject this at registration time, but
+        # build_action_from_capability itself does not re-validate;
+        # it lets WorkflowAction's own constructor raise.
+        capability = Capability(
+            name="Broken",
+            description="d",
+            intent_types=(IntentType.QUESTION,),
+            action_kind=WorkflowAction.kind,
+            workflow_id=None,
+        )
+
+        with self.assertRaises(InvalidActionError):
+            build_action_from_capability(capability, workflow_engine=_engine())

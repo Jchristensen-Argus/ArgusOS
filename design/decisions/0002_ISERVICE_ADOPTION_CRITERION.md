@@ -344,3 +344,40 @@ as an explicit precondition for future `IService` adoption. This
 ADR's Status remains `Proposed`, per standing instruction; only the
 Founder/Architect elevates it to `Accepted` or opens the follow-up
 package.
+
+## Empirical Finding (Package 013 - Capability Registry)
+
+`ICapabilityRegistry`, per the Founder's Package 013 work order, does
+NOT inherit `IService` - the first new core service since Memory
+Service (Package 007) to deliberately abstain from adopting it.
+`CapabilityRegistry` is a pure metadata CRUD store: `register`,
+`unregister`, `get`, `find_by_intent_type`, `list_capabilities`, and
+`contains` are all fully usable the instant the registry is
+constructed, with no background thread, no connection to open or
+close, and nothing for `start()`/`stop()` to meaningfully enable or
+disable - architecturally identical to Knowledge Service (006) and
+Memory Service (007).
+
+This is a different kind of data point than any adopter recorded so
+far: not a new adopter reinforcing the gated/ungated split, but a
+new *non*-adopter correctly predicted by the criterion itself.
+Applying "adopt `IService` only when `start()`/`stop()` would do
+real, distinct work" to `CapabilityRegistry` during its design
+correctly ruled out adoption before any code was written, the same
+judgment call Memory Service's own report made for itself in Package
+007. Eight core services now exist that do not implement `IService`
+(Configuration, the Logger, the Event Bus, the Service Registry, the
+Lifecycle Manager, Knowledge Service, Memory Service, and now
+Capability Registry), alongside five that do (Scheduler, IntentRouter,
+WorkflowEngine, ConversationManager, and IntentDispatcher - four of
+which are genuinely gated).
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted for the
+five existing adopters. This finding does not add urgency to that
+recommendation, but it does reinforce that the criterion itself is
+doing real work as a design-time filter, not just a post-hoc
+classification exercise applied to packages that already adopted
+`IService` regardless. This ADR's Status remains `Proposed`, per
+standing instruction; only the Founder/Architect elevates it to
+`Accepted` or opens the follow-up package.

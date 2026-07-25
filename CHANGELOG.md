@@ -563,3 +563,40 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `IntentDispatcher` is not wired into `ConversationManager` - the two compose only if some future caller explicitly feeds a resolved Intent from one into the other; `manager.py` was not modified by this package.
 - Mappings are held only in memory; nothing persists across process restarts.
 - `IntentDispatcher` does not import `IWorkflowEngine` directly (see the Architectural Note in `factory/packages/012_INTENT_DISPATCHER.md`) - this is a deliberate design choice for extensibility, not a limitation, but is called out here since it differs from ConversationManager's (Package 011) direct-dependency pattern.
+
+## Package 013 - Capability Registry
+
+### Added
+
+- Added `argus/capability/` package (Package 013 - Capability Registry):
+  - `capability.py` - `Capability`, an immutable dataclass describing one thing ArgusOS knows how to do: `name`, `description`, `intent_types`, `action_kind`, `id` (auto-generated), `workflow_id` (Version 1), `enabled` (default `True`), `metadata`. Pure data - holds no live service reference and does not validate its own fields.
+  - `interfaces.py` - `ICapabilityRegistry`, a plain `ABC` (deliberately NOT inheriting `IService` - see the ADR Update below): `register`, `unregister`, `get`, `find_by_intent_type`, `list_capabilities`, `contains`.
+  - `registry.py` - `CapabilityRegistry`: an in-memory registry of `Capability` objects keyed by id. `register()` validates a Capability's fields (non-empty id/name/intent_types/action_kind, and a `workflow_id` when `action_kind` is `"workflow"`) before accepting it - the one piece of business logic this module contains, and it is validation, not execution. Publishes `CapabilityRegistered`/`CapabilityUnregistered` on success only.
+  - `exceptions.py` - `CapabilityError`, `InvalidCapabilityError`, `DuplicateCapabilityError`, `CapabilityNotFoundError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/013_CAPABILITY_REGISTRY.md`, including a note that no `design/specifications/CAPABILITY.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009, 010, 011, and 012).
+- Extended `argus/events/event_types.py`'s `EventType` with two new members: `CAPABILITY_REGISTERED`, `CAPABILITY_UNREGISTERED`.
+- Added `argus/dispatcher/action.py::build_action_from_capability(capability, *, workflow_engine)`: translates a Capability's metadata into a constructed `Action`. Version 1 supports only `action_kind == "workflow"` (raises `InvalidActionError` otherwise). This is the only place in `argus/dispatcher/` that imports `argus.capability`.
+- Added `tests/test_capability.py` (16 new tests: the `Capability` model), `tests/test_capability_registry.py` (37 new tests: `CapabilityRegistry`).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Capability Registry resolves from the Container, has an initial enabled capability for every `IntentType`, and that the Intent Dispatcher can resolve every `IntentType` end-to-end.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"capability_registry"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- **`argus/dispatcher/` revised to remove all hardcoded capability knowledge**, per this package's target architecture (`Intent -> Capability Registry -> Intent Dispatcher -> Action -> Workflow`):
+  - `IIntentDispatcher`/`IntentDispatcher`: `register_mapping()`, `remove_mapping()`, and `list_mappings()` **removed** - that responsibility now belongs entirely to `ICapabilityRegistry`. `IntentDispatcher.__init__` now takes `(event_bus, capability_registry, action_factory)`, not `(event_bus)` with mappings registered after construction. `resolve(intent)` now returns a `Capability` (queried live from the injected registry, picking the first *enabled* match in registration order), not an `Action`. `dispatch()`'s behavior and its six published events are otherwise unchanged, except `ActionResolved`'s payload now also carries `capability_id`, and `DispatchFailed`'s `stage` payload gained a new possible value, `"build"` (an `action_factory` failure), alongside the existing `"resolve"`/`"execute"`.
+  - `argus/dispatcher/exceptions.py`: `NoMappingError` renamed to `NoCapabilityError`; `DuplicateMappingError`/`MappingNotFoundError` removed (their responsibility moved to `argus.capability.exceptions.DuplicateCapabilityError`/`CapabilityNotFoundError`).
+  - `argus/dispatcher/action.py`: `Action`/`WorkflowAction` unchanged (considered renaming `Action`, per this package's explicit allowance, and decided against it - see `IMPLEMENTATION_REPORT.md`'s Engineering Decisions).
+  - `argus/dispatcher/mapping.py` (`DEFAULT_WORKFLOW_IDS`): unchanged - reused by `bootstrap.py` to populate this package's five Version 1 Capabilities.
+- `argus/bootstrap.py` now constructs `CapabilityRegistry` (depends on the Event Bus only) immediately after the Conversation Manager, registers it in the Container as `"capability_registry"`, and populates five `Capability` instances from `DEFAULT_WORKFLOW_IDS` via `register()`. `IntentDispatcher` is now constructed after `CapabilityRegistry` (its 14th-core-service slot, one later than Package 012's 12th), with an `action_factory` built via `functools.partial(build_action_from_capability, workflow_engine=workflow_engine)`. Bootstrap order is now ... -> Conversation Manager -> Capability Registry -> Intent Dispatcher -> Register Core Services -> Application. `_register_core_services` now registers thirteen core services. `CORE_SERVICES_VERSION` remains `"0.1.2"` - unchanged by this package, per its own explicit Version Policy.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `CapabilityRegistry` is the first new *non*-adopter of `IService` since Memory Service (Package 007) - a different kind of data point than the five gated/ungated adopters recorded so far, confirming the criterion correctly rules out adoption at design time, not just in hindsight. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- The five Version 1 Capabilities reference `workflow_id`s (`answer_workflow`, etc.) that no other package has registered an actual Workflow against - dispatching any of them still raises `ActionExecutionError` (wrapping `WorkflowNotFoundError`) until some future package registers real workflows under those ids. Unchanged from Package 012's own Known Limitations.
+- `find_by_intent_type()` returns disabled capabilities too (a pure filter, by design) - callers other than `IntentDispatcher.resolve()` that query the registry directly must apply their own enabled-filtering if they need it.
+- Capabilities are held only in memory; nothing persists across process restarts.
+- Only `action_kind == "workflow"` is supported by `build_action_from_capability()` in Version 1; a capability with any other `action_kind` will fail at dispatch time with `ActionExecutionError` (`stage="build"`).

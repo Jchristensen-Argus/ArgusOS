@@ -2,23 +2,30 @@
 Exceptions raised by the ArgusOS Intent Dispatcher.
 
 Purpose:
-    Give callers explicit, catchable failure modes for mapping
-    registration and dispatch, per the coding standard's "raise
+    Give callers explicit, catchable failure modes for capability
+    resolution and dispatch, per the coding standard's "raise
     meaningful exceptions... never silently ignore errors" and
-    factory/packages/012_INTENT_DISPATCHER.md.
+    factory/packages/012_INTENT_DISPATCHER.md and
+    factory/packages/013_CAPABILITY_REGISTRY.md.
 
 Responsibilities:
     - Provide a general dispatcher-subsystem error base, and more
       specific subtypes for "invalid intent," "invalid action," "no
-      mapping," "duplicate mapping," "mapping not found," and "action
-      execution failed" failures, so callers can catch either the
-      broad or the precise failure mode - matching the exception
-      hierarchy shape already established by
+      capability," and "action execution failed" failures, so callers
+      can catch either the broad or the precise failure mode -
+      matching the exception hierarchy shape already established by
       argus.workflow.exceptions and argus.conversation.exceptions.
 
 Non-Responsibilities:
     - These exceptions carry no behavior beyond a message; they do
       not log, retry, or recover.
+    - Failures specific to registering, unregistering, or looking up
+      a Capability by id belong to argus.capability.exceptions, not
+      here - as of Package 013, this module no longer owns any
+      mapping-registration concept of its own (see this package's
+      IMPLEMENTATION_REPORT.md for the removal of the Package 012
+      register_mapping/remove_mapping surface and its
+      DuplicateMappingError/MappingNotFoundError exceptions).
 
 Dependencies:
     None.
@@ -34,36 +41,32 @@ class DispatcherError(Exception):
 
 class InvalidIntentError(DispatcherError):
     """Raised when resolve() or dispatch() is given something that is
-    not an Intent instance, or register_mapping()/remove_mapping() is
-    given something that is not an IntentType."""
+    not an Intent instance."""
 
 
 class InvalidActionError(DispatcherError):
-    """Raised when register_mapping() is given something that is not
-    an Action instance, or when a concrete Action (e.g. WorkflowAction)
-    is constructed with invalid input."""
+    """Raised when a concrete Action (e.g. WorkflowAction) is
+    constructed with invalid input, or when
+    argus.dispatcher.action.build_action_from_capability is given a
+    Capability whose action_kind has no supported Action to build."""
 
 
-class NoMappingError(DispatcherError):
-    """Raised by resolve() when no Action is currently registered for
-    an Intent's name - for example, if a mapping was removed via
-    remove_mapping() and never replaced."""
-
-
-class DuplicateMappingError(DispatcherError):
-    """Raised when register_mapping() is called for an IntentType that
-    already has a registered Action. Callers must call remove_mapping()
-    first to replace an existing mapping."""
-
-
-class MappingNotFoundError(DispatcherError):
-    """Raised when remove_mapping() is called for an IntentType with
-    no currently registered Action."""
+class NoCapabilityError(DispatcherError):
+    """Raised by resolve() when no enabled Capability is currently
+    registered in the Capability Registry for an Intent's name - for
+    example, if every Capability supporting that IntentType is
+    disabled, or none was ever registered. Named for what it reports
+    (no capability was found to resolve to), replacing Package 012's
+    NoMappingError now that capability ownership has moved to
+    argus.capability.registry.CapabilityRegistry - see this package's
+    IMPLEMENTATION_REPORT.md."""
 
 
 class ActionExecutionError(DispatcherError):
-    """Raised by dispatch() when the resolved Action's execute() call
-    raises. Wraps the original exception (via `raise ... from error`,
-    preserving the traceback chain) so callers of IIntentDispatcher
-    never need to know which concrete Action type - or which
-    downstream service, such as IWorkflowEngine - actually failed."""
+    """Raised by dispatch() when either building an Action from the
+    resolved Capability (via the injected action_factory) or calling
+    that Action's execute() raises. Wraps the original exception (via
+    `raise ... from error`, preserving the traceback chain) so callers
+    of IIntentDispatcher never need to know which concrete Action type
+    - or which downstream service, such as IWorkflowEngine - actually
+    failed."""

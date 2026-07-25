@@ -22,6 +22,7 @@ CORE_SERVICE_NAMES = (
     "intent_router",
     "workflow_engine",
     "conversation_manager",
+    "capability_registry",
     "intent_dispatcher",
 )
 

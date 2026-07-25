@@ -2,9 +2,11 @@
 Action and WorkflowAction for the ArgusOS Intent Dispatcher.
 
 Purpose:
-    Represent "the executable thing a resolved Intent maps to," in a
-    way that lets IntentDispatcher invoke it without knowing what kind
-    of Action it is, per factory/packages/012_INTENT_DISPATCHER.md.
+    Represent "the executable thing a resolved Capability maps to," in
+    a way that lets IntentDispatcher invoke it without knowing what
+    kind of Action it is, per
+    factory/packages/012_INTENT_DISPATCHER.md and
+    factory/packages/013_CAPABILITY_REGISTRY.md.
 
 Responsibilities:
     - Action: an abstract base class declaring the single method
@@ -17,6 +19,16 @@ Responsibilities:
       IWorkflowEngine's own execute() method - the same public method
       ConversationManager (Package 011) already delegates to. Carries
       no workflow logic of its own.
+    - build_action_from_capability: translates a Capability's metadata
+      (action_kind, workflow_id) into a constructed Action instance.
+      Added by Package 013 as the "instantiate/obtain Action" step of
+      IntentDispatcher.dispatch() - see that package's work order.
+      This function, not IntentDispatcher itself, is where a
+      Capability's action_kind is interpreted, and it is the only
+      place in this module that imports argus.capability - a plain
+      data-type dependency, not a service dependency (see
+      argus/capability/capability.py: Capability holds no live service
+      reference of its own).
 
 Non-Responsibilities:
     - Action declares no constructor and holds no state; only concrete
@@ -25,7 +37,17 @@ Non-Responsibilities:
       contract against whatever backend it needs (a plugin runner, an
       agent client, a connector client) - each is free to take
       whatever dependencies its own execute() requires, without
-      IntentDispatcher or this module changing at all.
+      IntentDispatcher or this module changing at all. Considered
+      renaming Action to ActionBase/IAction while making this change
+      (per Package 013's explicit "you MAY rename... ONLY if it
+      meaningfully improves the architecture" allowance) and decided
+      against it: Action's one-method contract is completely
+      unaffected by Package 013's refactor - only *where* an Action
+      gets constructed changed (build_action_from_capability, called
+      by IntentDispatcher via an injected factory, instead of
+      bootstrap.py registering pre-built Actions directly) - so a
+      rename here would have been cosmetic only, which Package 013's
+      own instruction explicitly rules out.
     - WorkflowAction does not register, cancel, or inspect workflows -
       it only calls execute() on a workflow_id assumed to already be
       registered elsewhere (bootstrap.py or another component),
@@ -37,17 +59,25 @@ Non-Responsibilities:
       WorkflowError) - it lets them propagate. Translating a failed
       Action into a dispatcher-level failure (ActionExecutionError)
       and publishing DispatchFailed is IntentDispatcher's
-      responsibility, not any individual Action's.
+      responsibility, not any individual Action's or
+      build_action_from_capability's - the factory function itself
+      only translates an *unsupported action_kind* into
+      InvalidActionError; it does not catch WorkflowAction
+      construction failures beyond that, and does not catch execute()
+      failures at all (it never calls execute()).
 
 Dependencies:
     argus.dispatcher.exceptions (InvalidActionError), argus.workflow
-    (IWorkflowEngine), for WorkflowAction only. Action itself has no
+    (IWorkflowEngine), argus.capability.capability (Capability, for
+    build_action_from_capability's parameter type only - a data
+    dependency, not a service dependency). Action itself has no
     dependencies beyond the standard library.
 """
 
 from abc import ABC, abstractmethod
 from typing import Any, Mapping, Optional
 
+from argus.capability.capability import Capability
 from argus.dispatcher.exceptions import InvalidActionError
 from argus.workflow.interfaces import IWorkflowEngine
 
@@ -131,3 +161,49 @@ class WorkflowAction(Action):
 
     def execute(self, *, context: Optional[Mapping[str, Any]] = None) -> Mapping[str, Any]:
         return self._workflow_engine.execute(self._workflow_id, context=context)
+
+def build_action_from_capability(
+    capability: Capability, *, workflow_engine: IWorkflowEngine
+) -> Action:
+    """
+    Translate a Capability's metadata into a constructed Action.
+
+    Purpose:
+        Be the one place a Capability's action_kind is interpreted -
+        IntentDispatcher itself never inspects action_kind directly,
+        per factory/packages/013_CAPABILITY_REGISTRY.md's "Intent
+        Dispatcher: Resolves capabilities and dispatches Actions"
+        boundary. Called by IntentDispatcher only indirectly, via an
+        injected `action_factory` callable bootstrap.py builds from
+        this function (functools.partial'd with a concrete
+        workflow_engine) - dispatcher.py itself never imports this
+        function, IWorkflowEngine, or WorkflowAction, preserving the
+        zero-argus.workflow-dependency property established in
+        Package 012.
+
+    Parameters:
+        capability: The resolved Capability to build an Action for.
+        workflow_engine: The IWorkflowEngine a "workflow" capability's
+            resulting WorkflowAction will delegate to.
+
+    Returns:
+        A constructed Action instance ready for execute() to be
+        called on it.
+
+    Raises:
+        InvalidActionError if capability.action_kind is not a
+        supported action kind. Version 1 supports only "workflow"
+        (WorkflowAction.kind). Also propagates whatever
+        WorkflowAction's own constructor raises (InvalidActionError,
+        for a malformed workflow_id or workflow_engine - see
+        WorkflowAction.__init__).
+    """
+    if capability.action_kind == WorkflowAction.kind:
+        return WorkflowAction(
+            workflow_id=capability.workflow_id, workflow_engine=workflow_engine
+        )
+    raise InvalidActionError(
+        f"No Action can be built for action_kind {capability.action_kind!r} "
+        f"(capability {capability.id!r}) - Version 1 supports only "
+        f"{WorkflowAction.kind!r}."
+    )

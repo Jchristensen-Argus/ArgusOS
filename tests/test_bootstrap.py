@@ -4,6 +4,7 @@ import unittest
 
 from argus.application import Application
 from argus.bootstrap import bootstrap
+from argus.capability import ICapabilityRegistry, CapabilityRegistry
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -27,6 +28,7 @@ CORE_SERVICE_NAMES = (
     "intent_router",
     "workflow_engine",
     "conversation_manager",
+    "capability_registry",
     "intent_dispatcher",
 )
 
@@ -159,20 +161,46 @@ class BootstrapTests(unittest.TestCase):
         finally:
             application.shutdown()
 
-    def test_bootstrap_intent_dispatcher_has_initial_mappings(self):
+    def test_bootstrap_registers_capability_registry_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("capability_registry"))
+            capability_registry = application.container.resolve("capability_registry")
+            self.assertIsInstance(capability_registry, ICapabilityRegistry)
+            self.assertIsInstance(capability_registry, CapabilityRegistry)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_capability_registry_has_initial_capabilities(self):
         from argus.intent import IntentType
 
         application = bootstrap()
 
         try:
-            intent_dispatcher = application.container.resolve("intent_dispatcher")
-            mappings = intent_dispatcher.list_mappings()
+            capability_registry = application.container.resolve("capability_registry")
             for intent_type in IntentType:
-                self.assertIn(
-                    intent_type,
-                    mappings,
-                    msg=f"{intent_type.name} has no initial mapping registered",
+                matches = capability_registry.find_by_intent_type(intent_type)
+                self.assertTrue(
+                    any(capability.enabled for capability in matches),
+                    msg=f"{intent_type.name} has no initial enabled capability registered",
                 )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_intent_dispatcher_resolves_every_intent_type(self):
+        from argus.intent import Intent, IntentType
+
+        application = bootstrap()
+
+        try:
+            intent_dispatcher = application.container.resolve("intent_dispatcher")
+            for intent_type in IntentType:
+                capability = intent_dispatcher.resolve(
+                    Intent(name=intent_type, confidence=1.0)
+                )
+                self.assertTrue(capability.enabled)
+                self.assertIn(intent_type, capability.intent_types)
         finally:
             application.shutdown()
 

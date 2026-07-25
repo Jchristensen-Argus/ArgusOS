@@ -9,21 +9,19 @@ Purpose:
     argus/conversation/__init__.py.
 
 Dependencies:
-    argus.dispatcher.action, argus.dispatcher.exceptions,
-    argus.dispatcher.interfaces, argus.dispatcher.dispatcher,
+    argus.dispatcher.action, argus.dispatcher.dispatcher,
+    argus.dispatcher.exceptions, argus.dispatcher.interfaces,
     argus.dispatcher.mapping.
 """
 
-from argus.dispatcher.action import Action, WorkflowAction
-from argus.dispatcher.dispatcher import IntentDispatcher
+from argus.dispatcher.action import Action, WorkflowAction, build_action_from_capability
+from argus.dispatcher.dispatcher import ActionFactory, IntentDispatcher
 from argus.dispatcher.exceptions import (
     ActionExecutionError,
     DispatcherError,
-    DuplicateMappingError,
     InvalidActionError,
     InvalidIntentError,
-    MappingNotFoundError,
-    NoMappingError,
+    NoCapabilityError,
 )
 from argus.dispatcher.interfaces import IIntentDispatcher
 from argus.dispatcher.mapping import DEFAULT_WORKFLOW_IDS
@@ -31,14 +29,14 @@ from argus.dispatcher.mapping import DEFAULT_WORKFLOW_IDS
 __all__ = [
     "Action",
     "WorkflowAction",
+    "build_action_from_capability",
     "IIntentDispatcher",
     "IntentDispatcher",
+    "ActionFactory",
     "DEFAULT_WORKFLOW_IDS",
     "DispatcherError",
     "InvalidIntentError",
     "InvalidActionError",
-    "NoMappingError",
-    "DuplicateMappingError",
-    "MappingNotFoundError",
+    "NoCapabilityError",
     "ActionExecutionError",
 ]

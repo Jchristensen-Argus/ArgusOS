@@ -1,60 +1,76 @@
 """
-IntentDispatcher: deterministic mapping-and-delegation for the ArgusOS
-Intent Dispatcher.
+IntentDispatcher: deterministic capability-resolution-and-delegation
+for the ArgusOS Intent Dispatcher.
 
 Purpose:
-    Implement IIntentDispatcher: translate a resolved Intent into an
-    executable Action via a configurable mapping table, and delegate
-    execution to that Action - never to IWorkflowEngine or any other
-    backend directly - per
-    factory/packages/012_INTENT_DISPATCHER.md.
+    Implement IIntentDispatcher: resolve a resolved Intent to a
+    Capability via an injected ICapabilityRegistry, obtain the Action
+    that Capability describes via an injected action_factory, and
+    delegate execution to that Action - never to IWorkflowEngine or
+    any other backend directly, and never by holding its own
+    knowledge of what capabilities exist - per
+    factory/packages/012_INTENT_DISPATCHER.md, as revised by
+    factory/packages/013_CAPABILITY_REGISTRY.md.
 
 Responsibilities:
-    - register_mapping / remove_mapping / resolve / list_mappings: an
-      in-memory registry of Action objects, keyed by IntentType.
-      Registry operations are not affected by the dispatcher's own
-      IService lifecycle state, matching the precedent set by
-      Scheduler's schedule/cancel/pause/resume (Package 008),
-      WorkflowEngine's register_workflow/cancel/get_workflow (Package
-      010), and ConversationManager's start_session/end_session/
-      history/active_session (Package 011).
-    - dispatch: resolve an Intent to its registered Action and call
-      that Action's own execute() method - the dispatcher never
-      inspects, constructs, or reasons about what the Action actually
-      does beyond calling execute() on it and, for WorkflowAction
+    - resolve: query the injected ICapabilityRegistry for every
+      Capability supporting an Intent's name, and deterministically
+      select the first *enabled* match, in the registry's own
+      registration order. This selection policy - "first enabled
+      match wins" - lives here, not in the Capability Registry (see
+      ICapabilityRegistry.find_by_intent_type()'s own docstring: it is
+      a pure filter with no enabled/disabled policy and no selection
+      between multiple matches). A pure lookup; not affected by the
+      dispatcher's own IService lifecycle state, matching the
+      precedent set by Scheduler's schedule/cancel/pause/resume
+      (Package 008), WorkflowEngine's register_workflow/cancel/
+      get_workflow (Package 010), and ConversationManager's
+      start_session/end_session/history/active_session (Package 011).
+    - dispatch: resolve an Intent to its Capability, call the injected
+      action_factory to obtain an Action for it, and call that
+      Action's own execute() method - the dispatcher never inspects,
+      constructs, or reasons about what the Action actually does
+      beyond calling execute() on it and, for a WorkflowAction
       specifically, reading its workflow_id to publish
       WorkflowSelected (see the module's Non-Responsibilities for why
-      this one exception exists). Publishes IntentDispatched,
-      ActionResolved, WorkflowSelected (WorkflowAction only),
+      this one exception exists, unchanged from Package 012).
+      Publishes IntentDispatched, ActionResolved (capability_id and
+      action_kind), WorkflowSelected (WorkflowAction only),
       DispatchStarted, and then DispatchCompleted or DispatchFailed,
       per IIntentDispatcher.dispatch()'s docstring.
     - initialize / start / stop / status, per the inherited IService
       contract. dispatch() *is* gated on the dispatcher's own
       lifecycle state: it raises DispatcherError unless the
-      dispatcher's self-tracked state is RUNNING. This mirrors
-      Scheduler.tick() (008), WorkflowEngine.execute() (010), and
-      ConversationManager.receive() (011) exactly - dispatch() is
-      IntentDispatcher's one "do real work" method, and per ADR-0002's
-      now-four-data-point pattern, that is precisely the kind of
-      method IService's start()/stop() docstring describes gating.
-      register_mapping/remove_mapping/resolve/list_mappings remain
-      ungated, matching every prior package's registry-operations
-      precedent.
+      dispatcher's self-tracked state is RUNNING, unchanged from
+      Package 012. resolve() remains ungated, matching every prior
+      package's registry-operations precedent.
 
 Non-Responsibilities:
+    - As of Package 013, IntentDispatcher holds NO capability
+      knowledge of its own - no internal IntentType -> Action mapping
+      exists anywhere in this class. Every dispatch() call queries the
+      injected ICapabilityRegistry live; nothing about "what
+      capabilities exist" is cached, hard-coded, or registered
+      directly on the dispatcher (Package 012's register_mapping /
+      remove_mapping / list_mappings methods were removed from
+      IIntentDispatcher for exactly this reason - see
+      IMPLEMENTATION_REPORT.md).
     - IntentDispatcher contains no workflow logic and no intent
-      parsing logic: it never imports argus.workflow.engine,
+      parsing logic: it never imports argus.workflow (any submodule),
       argus.intent.router, or argus.intent.parser, and no intent name
       branches into service-specific code anywhere in this module
-      (only into a table-driven Action lookup). The single exception
-      is an isinstance(action, WorkflowAction) check used solely to
-      decide whether to publish WorkflowSelected - this reads
-      WorkflowAction's own workflow_id property, already computed by
-      WorkflowAction itself, and calls nothing on IWorkflowEngine
-      directly. dispatch() delegates execution exclusively through
-      Action.execute(), never through IWorkflowEngine.execute()
-      directly - see argus/dispatcher/action.py for where that actual
-      IWorkflowEngine call lives.
+      (only into the injected action_factory callable, which
+      dispatcher.py treats as opaque). The one exception, unchanged
+      from Package 012, is an isinstance(action, WorkflowAction) check
+      used solely to decide whether to publish WorkflowSelected - this
+      reads WorkflowAction's own workflow_id property and calls
+      nothing on IWorkflowEngine directly. WorkflowAction itself lives
+      in this same package (argus.dispatcher.action), not in
+      argus.workflow, so this check does not reintroduce a dependency
+      on the execution backend - see argus/dispatcher/action.py for
+      where the actual IWorkflowEngine dependency lives
+      (build_action_from_capability, called only via the injected
+      action_factory).
     - No AI, no LLM, no networking, no persistence, no plugins, no
       retries, per the work order's explicit Version 1 Constraints.
       dispatch() runs entirely within the calling thread and returns
@@ -63,30 +79,41 @@ Non-Responsibilities:
 
 Dependencies:
     argus.events (Event, EventType, IEventBus), argus.lifecycle
-    (LifecycleState), argus.intent.intent (Intent, IntentType),
-    argus.dispatcher (Action, WorkflowAction, IIntentDispatcher, and
-    the dispatcher exceptions).
+    (LifecycleState), argus.intent.intent (Intent), argus.capability
+    (Capability, ICapabilityRegistry), argus.dispatcher (Action,
+    WorkflowAction, IIntentDispatcher, and the dispatcher exceptions).
+    Notably NOT argus.workflow - see this module's
+    Non-Responsibilities.
 """
 
-from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
+from argus.capability.capability import Capability
+from argus.capability.interfaces import ICapabilityRegistry
 from argus.dispatcher.action import Action, WorkflowAction
 from argus.dispatcher.exceptions import (
     ActionExecutionError,
     DispatcherError,
-    DuplicateMappingError,
-    InvalidActionError,
     InvalidIntentError,
-    MappingNotFoundError,
-    NoMappingError,
+    NoCapabilityError,
 )
 from argus.dispatcher.interfaces import IIntentDispatcher
 from argus.events.event import Event
 from argus.events.event_types import EventType
 from argus.events.interfaces import IEventBus
-from argus.intent.intent import Intent, IntentType
+from argus.intent.intent import Intent
 from argus.lifecycle.lifecycle import LifecycleState
+
+# A dispatcher-injected translator from a resolved Capability to an
+# executable Action. Deliberately a plain callable, not a class the
+# dispatcher constructs or inspects - see the module docstring and
+# argus/dispatcher/action.py's build_action_from_capability, the
+# Version 1 function bootstrap.py partially applies to build this
+# callable. This is what keeps dispatcher.py free of any
+# argus.workflow import, matching the opaque-callable idiom already
+# established by StepAction (Package 010) and ScheduledTask.callback
+# (Package 008).
+ActionFactory = Callable[[Capability], Action]
 
 
 class IntentDispatcher(IIntentDispatcher):
@@ -94,26 +121,35 @@ class IntentDispatcher(IIntentDispatcher):
     In-memory, synchronous implementation of IIntentDispatcher.
 
     Purpose:
-        Translate a resolved Intent into an executable Action via a
-        configurable mapping table, and delegate execution to that
-        Action, without the dispatcher itself knowing what kind of
-        Action it is beyond its `kind` label. See the module docstring
-        for the full design rationale.
+        Resolve a resolved Intent to a Capability via the injected
+        ICapabilityRegistry, obtain the Action that Capability
+        describes via the injected action_factory, and delegate
+        execution to that Action, without the dispatcher itself
+        knowing what kind of Action it is beyond its `kind` label, and
+        without holding any capability knowledge of its own. See the
+        module docstring for the full design rationale.
 
     Dependencies:
-        An IEventBus implementation, injected by the caller
-        (bootstrap.py). Notably, IntentDispatcher does NOT take an
-        IWorkflowEngine - see the module docstring's
-        Non-Responsibilities. Any workflow_engine dependency lives
-        entirely inside whichever WorkflowAction instances are
-        registered via register_mapping(), not in the dispatcher
-        itself.
+        An IEventBus, an ICapabilityRegistry, and an ActionFactory
+        callable, all injected by the caller (bootstrap.py). Notably,
+        IntentDispatcher does NOT take an IWorkflowEngine directly -
+        see the module docstring's Non-Responsibilities. Any
+        workflow_engine dependency lives entirely inside the injected
+        action_factory (built by bootstrap.py from
+        argus.dispatcher.action.build_action_from_capability), not in
+        the dispatcher itself.
     """
 
-    def __init__(self, event_bus: IEventBus) -> None:
+    def __init__(
+        self,
+        event_bus: IEventBus,
+        capability_registry: ICapabilityRegistry,
+        action_factory: ActionFactory,
+    ) -> None:
         self._event_bus = event_bus
+        self._capability_registry = capability_registry
+        self._action_factory = action_factory
         self._state: LifecycleState = LifecycleState.CREATED
-        self._mappings: Dict[IntentType, Action] = {}
 
     # -- IService -----------------------------------------------------
 
@@ -142,45 +178,20 @@ class IntentDispatcher(IIntentDispatcher):
     def status(self) -> LifecycleState:
         return self._state
 
-    # -- IIntentDispatcher: registry operations (unaffected by lifecycle state) --
+    # -- IIntentDispatcher: resolve (pure lookup, unaffected by lifecycle state) --
 
-    def register_mapping(self, intent_name: IntentType, action: Action) -> None:
-        if not isinstance(intent_name, IntentType):
-            raise InvalidIntentError(
-                f"intent_name must be an IntentType, got {intent_name!r}."
-            )
-        if not isinstance(action, Action):
-            raise InvalidActionError(f"action must be an Action, got {action!r}.")
-        if intent_name in self._mappings:
-            raise DuplicateMappingError(
-                f"Intent {intent_name.name} already has a registered Action; "
-                "call remove_mapping() first to replace it."
-            )
-        self._mappings[intent_name] = action
-
-    def remove_mapping(self, intent_name: IntentType) -> None:
-        if not isinstance(intent_name, IntentType):
-            raise InvalidIntentError(
-                f"intent_name must be an IntentType, got {intent_name!r}."
-            )
-        if intent_name not in self._mappings:
-            raise MappingNotFoundError(
-                f"No Action is registered for intent {intent_name.name}."
-            )
-        del self._mappings[intent_name]
-
-    def resolve(self, intent: Intent) -> Action:
+    def resolve(self, intent: Intent) -> Capability:
         if not isinstance(intent, Intent):
             raise InvalidIntentError(f"resolve() requires an Intent, got {intent!r}.")
-        try:
-            return self._mappings[intent.name]
-        except KeyError:
-            raise NoMappingError(
-                f"No Action is registered for intent {intent.name.name}."
-            ) from None
 
-    def list_mappings(self) -> Mapping[IntentType, Action]:
-        return MappingProxyType(dict(self._mappings))
+        candidates = self._capability_registry.find_by_intent_type(intent.name)
+        for capability in candidates:
+            if capability.enabled:
+                return capability
+
+        raise NoCapabilityError(
+            f"No enabled capability is registered for intent {intent.name.name}."
+        )
 
     # -- IIntentDispatcher: dispatch (gated on the dispatcher's own RUNNING state) --
 
@@ -200,16 +211,27 @@ class IntentDispatcher(IIntentDispatcher):
         )
 
         try:
-            action = self.resolve(intent)
+            capability = self.resolve(intent)
         except DispatcherError as error:
             self._publish_failed(intent, "resolve", str(error))
             raise
+
+        try:
+            action = self._action_factory(capability)
+        except Exception as error:
+            wrapped = ActionExecutionError(
+                f"Could not build an Action for capability {capability.id!r} "
+                f"(intent {intent.name.value!r}): {error}"
+            )
+            self._publish_failed(intent, "build", str(wrapped))
+            raise wrapped from error
 
         self._publish(
             EventType.ACTION_RESOLVED,
             {
                 "intent_id": intent.id,
                 "intent_name": intent.name.value,
+                "capability_id": capability.id,
                 "action_kind": action.kind,
             },
         )

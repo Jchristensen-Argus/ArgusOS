@@ -148,3 +148,15 @@ class EventType(Enum):
     DISPATCH_STARTED = "dispatch_started"
     DISPATCH_COMPLETED = "dispatch_completed"
     DISPATCH_FAILED = "dispatch_failed"
+
+    # Added by Package 013 - Capability Registry, per this module's
+    # own "single place new event types are added" scope note above.
+    # CapabilityRegistry publishes these on the existing Event Bus
+    # (see argus/capability/registry.py), mirroring KnowledgeService's
+    # KNOWLEDGE_CREATED/KNOWLEDGE_DELETED precedent (Package 006) for a
+    # metadata CRUD store. CAPABILITY_REGISTERED fires once per
+    # successful register() call; CAPABILITY_UNREGISTERED fires once
+    # per successful unregister() call. Neither fires for a failed
+    # (validation error, duplicate, or not-found) call.
+    CAPABILITY_REGISTERED = "capability_registered"
+    CAPABILITY_UNREGISTERED = "capability_unregistered"

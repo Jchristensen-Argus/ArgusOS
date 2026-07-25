@@ -12,8 +12,9 @@ Purpose:
     factory/packages/008_SCHEDULER_SERVICE.md,
     factory/packages/009_INTENT_ROUTER.md,
     factory/packages/010_WORKFLOW_ENGINE.md,
-    factory/packages/011_CONVERSATION_MANAGER.md, and
-    factory/packages/012_INTENT_DISPATCHER.md.
+    factory/packages/011_CONVERSATION_MANAGER.md,
+    factory/packages/012_INTENT_DISPATCHER.md, and
+    factory/packages/013_CAPABILITY_REGISTRY.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -95,44 +96,68 @@ Startup Sequence:
         execute() do. Registered only (LifecycleState.REGISTERED)
         here, for the same divergence-avoidance reasoning recorded in
         ADR-0002.
-    13. Construct the Intent Dispatcher (depends on the Event Bus)
-        and register it with the Container, per Package 012.
-        Bootstrap is the only place that constructs IntentDispatcher
+    13. Construct the Capability Registry (depends on the Event Bus)
+        and register it with the Container, per Package 013.
+        Bootstrap is the only place that constructs CapabilityRegistry
         directly; every other subsystem must resolve it from the
-        Container. Unlike Conversation Manager, IntentDispatcher does
-        NOT depend on the Workflow Engine directly - see
+        Container. Immediately after construction, bootstrap.py
+        registers five Capability instances - one per
+        argus.dispatcher.mapping.DEFAULT_WORKFLOW_IDS entry, the same
+        table Package 012 used - as this package's Version 1
+        population, per its explicit "Populate Version 1 using the
+        existing workflow mappings introduced in Package 012"
+        requirement. Unlike Scheduler, IntentRouter, WorkflowEngine,
+        ConversationManager, and IntentDispatcher, CapabilityRegistry
+        does NOT implement IService - see
+        argus/capability/interfaces.py's Architectural Note and
+        ADR-0002's newly appended Empirical Finding for this package.
+        It is registered with the Lifecycle Manager as
+        LifecycleState.REGISTERED, exactly like Knowledge Service and
+        Memory Service, which is not a divergence-avoidance workaround
+        here (there is no IService lifecycle to diverge from) but
+        simply this service's natural, permanent state.
+    14. Construct the Intent Dispatcher (depends on the Event Bus and,
+        as of Package 013, the Capability Registry) and register it
+        with the Container, per Packages 012 and 013. Bootstrap is the
+        only place that constructs IntentDispatcher directly; every
+        other subsystem must resolve it from the Container. As of
+        Package 013, IntentDispatcher no longer depends on the
+        Workflow Engine directly, nor does it hold any capability
+        knowledge of its own - see
         argus/dispatcher/dispatcher.py's module docstring. Instead,
-        bootstrap.py itself constructs five WorkflowAction instances
-        (one per argus.dispatcher.mapping.DEFAULT_WORKFLOW_IDS entry),
-        each wrapping the already-constructed WorkflowEngine, and
-        registers them as the Intent Dispatcher's five Version 1
-        "Initial mappings" via register_mapping() - the only place in
-        this package where a WorkflowAction is actually constructed.
-        Like Scheduler, IntentRouter, WorkflowEngine, and Conversation
-        Manager, IntentDispatcher implements IService with a genuine
-        gate (dispatch() requires the dispatcher's own state to be
-        RUNNING) but is registered only (LifecycleState.REGISTERED)
-        here, for the same divergence-avoidance reasoning recorded in
-        ADR-0002.
-    14. Register the twelve core services (Configuration, Logger,
+        bootstrap.py builds a single `action_factory` callable via
+        `functools.partial(build_action_from_capability,
+        workflow_engine=workflow_engine)` and injects it into
+        IntentDispatcher alongside the Capability Registry - this
+        closure is the only place in this package where a
+        WorkflowAction is ever actually constructed (lazily, once per
+        dispatch() call, inside build_action_from_capability - see
+        argus/dispatcher/action.py). Like Scheduler, IntentRouter,
+        WorkflowEngine, and Conversation Manager, IntentDispatcher
+        implements IService with a genuine gate (dispatch() requires
+        the dispatcher's own state to be RUNNING) but is registered
+        only (LifecycleState.REGISTERED) here, for the same
+        divergence-avoidance reasoning recorded in ADR-0002.
+    15. Register the thirteen core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
-        Engine, Conversation Manager, Intent Dispatcher) in the
-        Service Registry (identity/descriptive data only) and in the
-        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
-        None of them are initialized or started by this package.
-    15. Construct and start the Application.
+        Engine, Conversation Manager, Capability Registry, Intent
+        Dispatcher) in the Service Registry (identity/descriptive data
+        only) and in the Lifecycle Manager, where each enters
+        LifecycleState.REGISTERED. None of them are initialized or
+        started by this package.
+    16. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
     No engines (Atlas, Cortex, Hermes, Navigator, Sentinel) are
-    initialized here. Packages 003-012 register the Event Bus, Service
+    initialized here. Packages 003-013 register the Event Bus, Service
     Registry, Lifecycle Manager, Knowledge Service, Memory Service,
     Scheduler, Intent Router, Workflow Engine, Conversation Manager,
-    and Intent Dispatcher respectively but do not change Application's
-    lifecycle: no lifecycle events are published, and no core service
-    is initialized or started, by this package (see the Package 005
-    engineering notes).
+    Capability Registry, and Intent Dispatcher respectively but do not
+    change Application's lifecycle: no lifecycle events are published,
+    and no core service is initialized or started, by this package
+    (see the Package 005 engineering notes).
 
 Architectural Revision (Package 005):
     ServiceDescriptor no longer carries a `state` field. Architecture
@@ -152,7 +177,10 @@ Dependencies:
     argus.scheduler (Scheduler).
 """
 
+import functools
+
 from argus.application import Application
+from argus.capability import Capability, ICapabilityRegistry, CapabilityRegistry
 from argus.configuration import Configuration
 from argus.container import Container
 from argus.conversation import IConversationManager, ConversationManager
@@ -161,6 +189,7 @@ from argus.dispatcher import (
     IIntentDispatcher,
     IntentDispatcher,
     WorkflowAction,
+    build_action_from_capability,
 )
 from argus.events import IEventBus, InMemoryEventBus
 from argus.intent import IIntentRouter, IntentRouter
@@ -238,12 +267,29 @@ def bootstrap() -> Application:
     )
     container.register("conversation_manager", conversation_manager)
 
-    intent_dispatcher = IntentDispatcher(event_bus=event_bus)
+    capability_registry = CapabilityRegistry(event_bus=event_bus)
     for intent_type, workflow_id in DEFAULT_WORKFLOW_IDS.items():
-        intent_dispatcher.register_mapping(
-            intent_type,
-            WorkflowAction(workflow_id=workflow_id, workflow_engine=workflow_engine),
+        capability_registry.register(
+            Capability(
+                name=f"{intent_type.name.title()} Capability",
+                description=(
+                    f"Handles {intent_type.name} intents by delegating to "
+                    f"the {workflow_id!r} workflow."
+                ),
+                intent_types=(intent_type,),
+                action_kind=WorkflowAction.kind,
+                workflow_id=workflow_id,
+            )
         )
+    container.register("capability_registry", capability_registry)
+
+    intent_dispatcher = IntentDispatcher(
+        event_bus=event_bus,
+        capability_registry=capability_registry,
+        action_factory=functools.partial(
+            build_action_from_capability, workflow_engine=workflow_engine
+        ),
+    )
     container.register("intent_dispatcher", intent_dispatcher)
 
     _register_core_services(
@@ -258,6 +304,7 @@ def bootstrap() -> Application:
         intent_router=intent_router,
         workflow_engine=workflow_engine,
         conversation_manager=conversation_manager,
+        capability_registry=capability_registry,
         intent_dispatcher=intent_dispatcher,
     )
 
@@ -280,6 +327,7 @@ def _register_core_services(
     intent_router: IIntentRouter,
     workflow_engine: IWorkflowEngine,
     conversation_manager: IConversationManager,
+    capability_registry: ICapabilityRegistry,
     intent_dispatcher: IIntentDispatcher,
 ) -> None:
     """
@@ -295,20 +343,22 @@ def _register_core_services(
     Each of Configuration, the Logger, the Event Bus, the Service
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
     Service, Scheduler, the Intent Router, the Workflow Engine, the
-    Conversation Manager, and the Intent Dispatcher is recorded as a
-    ServiceDescriptor (identity and descriptive data only, no runtime
-    state) in the Service Registry, and as a LifecycleState.REGISTERED
-    entry in the Lifecycle Manager, which is the sole owner of runtime
-    lifecycle state for the Lifecycle Manager's own purposes. Neither
-    initialize() nor start() is called on the Lifecycle Manager for
-    any of them here. Scheduler, the Intent Router, the Workflow
-    Engine, the Conversation Manager, and the Intent Dispatcher are
-    the five classes among these twelve that actually implement
-    IService (see ADR-0002), but this function still does not call
-    any of their initialize()/start() directly - see the Startup
-    Sequence note in this module's docstring for why exercising their
-    real IService lifecycles during bootstrap was deliberately
-    avoided.
+    Conversation Manager, the Capability Registry, and the Intent
+    Dispatcher is recorded as a ServiceDescriptor (identity and
+    descriptive data only, no runtime state) in the Service Registry,
+    and as a LifecycleState.REGISTERED entry in the Lifecycle Manager,
+    which is the sole owner of runtime lifecycle state for the
+    Lifecycle Manager's own purposes. Neither initialize() nor start()
+    is called on the Lifecycle Manager for any of them here. Scheduler,
+    the Intent Router, the Workflow Engine, the Conversation Manager,
+    and the Intent Dispatcher are five of these thirteen that actually
+    implement IService (see ADR-0002); the Capability Registry
+    deliberately does not (see
+    argus/capability/interfaces.py's Architectural Note). This
+    function still does not call any IService adopter's
+    initialize()/start() directly - see the Startup Sequence note in
+    this module's docstring for why exercising their real IService
+    lifecycles during bootstrap was deliberately avoided.
 
     Parameters:
         service_registry: Where each core service is recorded as a
@@ -324,6 +374,7 @@ def _register_core_services(
         intent_router: The Intent Router instance.
         workflow_engine: The Workflow Engine instance.
         conversation_manager: The Conversation Manager instance.
+        capability_registry: The Capability Registry instance.
         intent_dispatcher: The Intent Dispatcher instance.
     """
     core_services = (
@@ -338,6 +389,7 @@ def _register_core_services(
         ("intent_router", intent_router, IIntentRouter),
         ("workflow_engine", workflow_engine, IWorkflowEngine),
         ("conversation_manager", conversation_manager, IConversationManager),
+        ("capability_registry", capability_registry, ICapabilityRegistry),
         ("intent_dispatcher", intent_dispatcher, IIntentDispatcher),
     )
 
