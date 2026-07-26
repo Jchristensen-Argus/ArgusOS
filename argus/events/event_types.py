@@ -323,3 +323,27 @@ class EventType(Enum):
     REASONING_QUERY_EXECUTED = "reasoning_query_executed"
     REASONING_RESULT_CREATED = "reasoning_result_created"
     REASONING_QUERY_FAILED = "reasoning_query_failed"
+
+    # Added by Package 021 - Decision Engine, per this module's own
+    # "single place new event types are added" scope note above.
+    # DecisionEngine publishes these on the existing Event Bus (see
+    # argus/decision/engine.py). Every evaluate()/evaluate_all() call
+    # publishes exactly one of two mutually exclusive outcomes: on
+    # success, DECISION_EVALUATED fires first - marking that every
+    # registered DecisionRule's predicate has been run against the
+    # given ReasoningResult(s) - immediately followed by
+    # DECISION_CREATED, marking that a structured Decision was
+    # subsequently assembled from the results; on failure (malformed
+    # input, or a registered rule's own predicate raising),
+    # DECISION_FAILED fires alone instead, and neither of the other
+    # two fires - mirroring REASONING_QUERY_EXECUTED/
+    # REASONING_RESULT_CREATED/REASONING_QUERY_FAILED's (Package 020)
+    # identical three-event, two-outcome shape. No event exists for
+    # register_rule()/remove_rule(): this package's own Events section
+    # names exactly these three event types, all evaluation-lifecycle
+    # - matching PLAN_REMOVED's (Package 015) and Connector Manager's
+    # unregister_connector()'s (Package 017) precedent of not inventing
+    # an event beyond what was explicitly asked for.
+    DECISION_EVALUATED = "decision_evaluated"
+    DECISION_CREATED = "decision_created"
+    DECISION_FAILED = "decision_failed"

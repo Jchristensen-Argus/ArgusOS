@@ -836,3 +836,39 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `find_paths()`'s exhaustive simple-path enumeration is combinatorially bounded by `max_depth` and the graph's own density; a very dense graph with a large `max_depth` could enumerate a large number of paths. No limit on result size exists in Version 1 beyond `max_depth` itself.
 - `ReasoningResult.metadata`'s `memory_synchronization_status` reflects Memory Integration's own bookkeeping only - it does not correlate individual matched Entities back to the specific memory keys that produced them (see `argus/reasoning/engine.py`'s own Architectural Decision).
 - No concurrency.
+
+## Package 021 - Decision Engine
+
+### Added
+
+- Added `argus/decision/` package (Package 021 - Decision Engine):
+  - `rule.py` - `DecisionRule`: an immutable value object (`name`, `predicate`, `priority`, `id`, `description`). `predicate` is a plain Python callable, `Callable[[Sequence[ReasoningResult]], bool]`, supplied directly by the caller - this module implements no interpreter, scripting language, `eval()`, `exec()`, or dynamic code generation of any kind, satisfying "No scripting. No Python execution. No dynamic code generation" by construction, not by added validation.
+  - `decision.py` - `Decision`: an immutable outcome (`decision_type`, `decision_id`, `matched_rules`, `reasoning_results`, `metadata`). "Decision is immutable."
+  - `interfaces.py` - `IDecisionEngine(IService)`: `evaluate`, `evaluate_all`, `register_rule`, `remove_rule`, `list_rules`, `decision_summary`, plus the inherited IService contract.
+  - `engine.py` - `DecisionEngine`: maintains a rule table and evaluates one or more `ReasoningResult` objects against every registered rule, in priority order (lower first, ties broken by registration order) - no "stop at first match." `matched_rules` reports every rule that matched; `Decision.metadata["rule_evaluations"]` reports a complete matched/not-matched trace for every registered rule. A registered rule's predicate raising an exception aborts the whole evaluation (unlike Memory Integration's best-effort batch philosophy) - `DECISION_FAILED` is published and `RuleEvaluationError` is raised, with no partial Decision returned. `DecisionEngine` holds an injected `IReasoningEngine` (per the explicit Bootstrap dependency instruction) but does not call it in Version 1 - see the ADR Update section below.
+  - `exceptions.py` - `DecisionError` (base), `InvalidDecisionRuleError`, `DuplicateRuleError`, `RuleNotFoundError`, `InvalidDecisionInputError`, `RuleEvaluationError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/021_DECISION_ENGINE.md`, including a note that no `design/specifications/DECISION_ENGINE.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-020).
+- Extended `argus/events/event_types.py`'s `EventType` with three new members: `DECISION_EVALUATED`, `DECISION_CREATED`, `DECISION_FAILED` - exactly the three this package's work order named, no more. `register_rule()`/`remove_rule()` publish nothing - this package's own Events section names only evaluation-lifecycle events.
+- Added `tests/test_decision.py` (7 new tests), `tests/test_decision_rule.py` (7 new tests), `tests/test_decision_engine.py` (44 new tests covering rule registration, duplicate rules, rule ordering, deterministic evaluation, multiple reasoning results, raising predicates, decision summaries, lifecycle behavior, and event publication).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Decision Engine resolves from the Container, is registered but not started, and can evaluate a real Reasoning Engine result end-to-end.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"decision_engine"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `DecisionEngine` (depends on the Event Bus and the Reasoning Engine) immediately after the Reasoning Engine and immediately before the Agent Runtime, registers it in the Container as `"decision_engine"`. Bootstrap order is now ... -> Reasoning Engine -> Decision Engine -> Agent Runtime -> Connector Manager -> Register Core Services -> Application. `_register_core_services` now registers twenty-one core services. `CORE_SERVICES_VERSION` remains `"0.2.0"` - unchanged by this package. DecisionEngine's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/reasoning/`, `argus/knowledge_graph/`, `argus/memory_integration/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - the Decision Engine consumes only `ReasoningResult`, an existing, unmodified type. Per this package's own explicit instruction, the Planner remains unchanged and does not yet consume the Decision Engine.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `DecisionEngine` DOES inherit `IService`, per explicit Founder instruction - but, like Package 018's Knowledge Graph and Package 020's Reasoning Engine, and unlike Package 019's Memory Integration, applying the criterion independently to this package's own methods would NOT have suggested adoption: all six public methods are in-memory and ungated. This is the fourth IService adopter in this codebase with zero gated methods, and the third of four consecutive directed-adoption packages (018, 020, 021) to diverge from the criterion's own independent conclusion (019 alone converged). Eleventh adopter overall, seven genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- No persistence - `DecisionEngine` retains no history of past Decisions; `decision_summary()` reflects the currently registered rule set only.
+- No AI, no machine learning, no probabilistic reasoning - every Decision is produced by deterministic, caller-supplied Python predicates evaluated in a fixed priority order.
+- No rule scripting - predicates are plain Python callables; this package implements no interpreter, DSL, or dynamic code execution of any kind.
+- A rule predicate that raises aborts the entire `evaluate()`/`evaluate_all()` call - there is no best-effort, partial-result mode.
+- The injected `IReasoningEngine` dependency is not called anywhere in Version 1 - see the ADR Update section and `argus/decision/interfaces.py`'s own Architectural Note.
+- The Planner does not yet consume the Decision Engine, per this package's own explicit Version 1 scope limit.
+- No concurrency.

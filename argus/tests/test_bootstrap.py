@@ -29,6 +29,7 @@ CORE_SERVICE_NAMES = (
     "knowledge_graph",
     "memory_integration",
     "reasoning_engine",
+    "decision_engine",
     "agent_runtime",
     "connector_manager",
 )

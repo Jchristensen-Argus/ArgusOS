@@ -29,6 +29,7 @@
 - [x] Knowledge Graph (Entity, Relationship, IKnowledgeGraph, KnowledgeGraph, Package 018)
 - [x] Memory Integration (MemoryMapper, IMemoryIntegration, MemoryIntegration, Package 019)
 - [x] Reasoning Engine (ReasoningQuery, ReasoningResult, IReasoningEngine, ReasoningEngine, Package 020)
+- [x] Decision Engine (DecisionRule, Decision, IDecisionEngine, DecisionEngine, Package 021)
 
 ---
 

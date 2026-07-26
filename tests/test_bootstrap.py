@@ -9,6 +9,7 @@ from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.reasoning import IReasoningEngine, ReasoningEngine
+from argus.decision import IDecisionEngine, DecisionEngine
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -42,6 +43,7 @@ CORE_SERVICE_NAMES = (
     "knowledge_graph",
     "memory_integration",
     "reasoning_engine",
+    "decision_engine",
     "agent_runtime",
     "connector_manager",
 )
@@ -450,6 +452,68 @@ class BootstrapTests(unittest.TestCase):
 
             neighbors_result = reasoning_engine.neighbors(alice.id)
             self.assertEqual(neighbors_result.matched_entities, (bob,))
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_decision_engine_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("decision_engine"))
+            decision_engine = application.container.resolve("decision_engine")
+            self.assertIsInstance(decision_engine, IDecisionEngine)
+            self.assertIsInstance(decision_engine, DecisionEngine)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_decision_engine_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            decision_engine = application.container.resolve("decision_engine")
+            self.assertEqual(decision_engine.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("decision_engine"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_decision_engine_evaluates_reasoning_result_end_to_end(self):
+        # Like the Reasoning Engine's own end-to-end bootstrap test,
+        # this touches no disk-backed resource - Decision Engine
+        # implements no persistence of its own, per this package's
+        # explicit Constraints.
+        from argus.decision import DecisionRule
+        from argus.knowledge_graph import Entity, Relationship
+
+        application = bootstrap()
+
+        try:
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            reasoning_engine = application.container.resolve("reasoning_engine")
+            decision_engine = application.container.resolve("decision_engine")
+
+            alice = Entity(entity_type="person", name="Alice")
+            bob = Entity(entity_type="person", name="Bob")
+            knowledge_graph.add_entity(alice)
+            knowledge_graph.add_entity(bob)
+            knowledge_graph.add_relationship(
+                Relationship(source_entity_id=alice.id, target_entity_id=bob.id, relationship_type="knows")
+            )
+
+            result = reasoning_engine.neighbors(alice.id)
+
+            has_matches = DecisionRule(
+                name="has_matches",
+                predicate=lambda results: any(r.matched_entities for r in results),
+                priority=1,
+            )
+            decision_engine.register_rule(has_matches)
+
+            decision = decision_engine.evaluate(result, decision_type="neighbor_check")
+            self.assertEqual(decision.matched_rules, (has_matches,))
+            self.assertEqual(decision.reasoning_results, (result,))
         finally:
             application.shutdown()
 

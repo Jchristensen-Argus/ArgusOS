@@ -819,3 +819,105 @@ three consecutive directed-adoption data points (two divergent, one
 convergent) rather than two. This ADR's Status remains `Proposed`, per
 standing instruction; only the Founder/Architect elevates it to
 `Accepted`, revises its text, or opens the follow-up package.
+
+## Empirical Finding (Package 021 - Decision Engine)
+
+`IDecisionEngine`, per the Founder's Package 021 work order, DOES
+inherit `IService` - again an explicit instruction, not this
+Engineer's own judgment call. Applying ADR-0002's criterion
+independently to this package's actual methods, however, would NOT
+have suggested adoption on its own - the same divergence Package
+018's Knowledge Graph and Package 020's Reasoning Engine both
+exhibited. All six public methods (`evaluate()`, `evaluate_all()`,
+`register_rule()`, `remove_rule()`, `list_rules()`,
+`decision_summary()`) are synchronous, in-memory operations: the two
+evaluation methods call only caller-supplied, in-process Python
+predicate functions against caller-supplied `ReasoningResult`
+objects, and the four registry methods operate on this engine's own
+local rule table - no external call, no dispatch, no write to
+another system, and no phase distinction any of them could plausibly
+be gated on. "Its responsibility is limited to deterministic decision
+evaluation," per this package's own Objective - architecturally much
+closer to `KnowledgeGraph` (Package 018) and `ReasoningEngine`
+(Package 020), both zero-gated adopters, than to `MemoryIntegration`
+(Package 019), whose genuinely gated methods perform effectful,
+stateful cross-system coordination that calling a local predicate
+function does not. `DecisionEngine` therefore implements the full
+IService lifecycle boilerplate (`initialize()`/`start()`/`stop()`/
+`status()`) but gates none of its own six public methods - exactly
+mirroring `KnowledgeGraph`'s (Package 018) and `ReasoningEngine`'s
+(Package 020) identical shape, making `DecisionEngine` the **fourth**
+IService adopter in this codebase with zero gated methods.
+
+This package also extends the three-consecutive-directed-adoption
+pattern Package 020's own finding identified: 018 diverged, 019
+converged, 020 diverged, and now 021 diverges again - three divergent
+cases against one convergent case across four consecutive packages
+where `IService` adoption itself was an explicit instruction rather
+than this Engineer's own judgment call. This further strengthens the
+recommendation (first raised in Package 019's finding, restated in
+Package 020's) that ADR-0002 be revised to formally separate
+"adoption" (directed or derived) from "gating" (always this
+Engineer's own criterion-driven judgment, regardless of the first
+answer's source) - the pattern is now consistent enough across four
+data points that treating them as a single combined decision, as the
+ADR's current text implicitly does, increasingly understates how
+independent the two questions actually are in practice.
+
+A distinct, related design point also surfaced in this package, worth
+recording separately from the adoption question itself: this
+package's own Bootstrap section lists the Reasoning Engine as a
+dependency ("Decision Engine depends on: Reasoning Engine"), and
+`DecisionEngine`'s constructor genuinely accepts an injected
+`IReasoningEngine` - but, unlike Package 020's Reasoning Engine (which
+genuinely calls its own injected `IMemoryIntegration
+.synchronization_status()` on every call), `DecisionEngine` never
+calls any method on its injected `IReasoningEngine` in Version 1. Two
+things distinguish this package's situation from Package 020's, not
+merely a stylistic choice: first, this package's own Objective
+describes `evaluate()`/`evaluate_all()` operating on `ReasoningResult`
+objects the caller already supplies, never on a live
+`IReasoningEngine` reference queried internally - unlike Package 020's
+own Objective, which explicitly stated the Reasoning Engine itself
+"consumes information from... Memory Integration." Second,
+`IReasoningEngine` has no equivalent to
+`IMemoryIntegration.synchronization_status()`'s zero-argument,
+whole-system snapshot - every one of its six public methods requires
+a specific, meaningful query parameter that `DecisionEngine` has no
+principled, non-arbitrary way to supply blindly on every call.
+Manufacturing a call (for example, to the inherited, always-`CREATED`
+`status()`) purely to claim "genuine use" would have been decorative,
+not functional - so the dependency is wired (constructor-injected,
+per the explicit Bootstrap instruction, ready for a future package to
+extend) but honestly left uncalled, a third distinct shape from this
+codebase's two prior precedents (Package 018's Planner/Knowledge
+Graph relationship, not wired into the constructor at all at the
+time, and Package 020's Reasoning Engine/Memory Integration
+relationship, wired and genuinely called every time). This is a
+dependency-usage judgment call, not an adoption-criterion question,
+and does not itself bear on ADR-0002 - recorded here only because it
+was discovered in the course of this same package's IService
+integration work, and because it is the direct architectural
+counterpart to Package 020's own equivalent finding about its
+Memory Integration dependency.
+
+Eleven adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, and now
+DecisionEngine), seven of which are genuinely gated (all but
+IntentRouter, KnowledgeGraph, ReasoningEngine, and DecisionEngine).
+Ten core services exist that do not implement `IService` at all
+(Configuration, the Logger, the Event Bus, the Service Registry, the
+Lifecycle Manager, Knowledge Service, Memory Service, Capability
+Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for eleven adopters rather than ten. This package's
+finding, read alongside Packages 018-020, makes an even stronger case
+that ADR-0002 could usefully be revised to formally separate
+"adoption" from "gating" as distinct questions, now backed by four
+consecutive directed-adoption data points (three divergent, one
+convergent) rather than three. This ADR's Status remains `Proposed`,
+per standing instruction; only the Founder/Architect elevates it to
+`Accepted`, revises its text, or opens the follow-up package.
