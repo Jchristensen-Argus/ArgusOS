@@ -945,3 +945,38 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `PlanningConstraint` carries no evaluable logic - purely descriptive data.
 - The Planner does not yet consume the Planning Session, per this package's own explicit Version 1 scope limit.
 - No concurrency.
+
+## Package 024 - Planner Session Integration
+
+### Added
+
+- Added `Planner.plan_session(planning_session: PlanningSession) -> Plan` to `argus/planner/planner.py`, and declared it on `IPlanner` (`argus/planner/interfaces.py`) - a second, additive entry point that builds a Plan from a `PlanningSession` by internally delegating to the pre-existing `create_plan()`/`add_step()` methods. "No duplicate planning logic": `plan_session()` synthesizes an `Intent(name=IntentType.UNKNOWN, confidence=0.0, ...)` (PlanningSession carries no Intent of its own), calls `self.create_plan()`, then calls `self.add_step()` once per `planning_session.goal` - every `PLAN_CREATED`/`PLAN_UPDATED` event this produces is published by those two pre-existing methods themselves.
+- Each `PlanningGoal` becomes one `PlanStep`: `description` is the goal's own description if non-empty, else its `name`; `required_capability` is the goal's `name` (its only other identifying field); `metadata` carries `goal_id`/`priority`. `PlanningConstraint`s are never turned into steps - each is recorded descriptively under the resulting Plan's own `metadata["constraints"]` instead, alongside `metadata["planning_session_id"]` and (when present) `metadata["cognitive_context_id"]`.
+- `plan_session()` raises the Planner's own pre-existing `InvalidPlanError` for a non-`PlanningSession` argument - no new exception type was introduced.
+- Added `factory/packages/024_PLANNER_SESSION_INTEGRATION.md`, including a note that no `design/specifications/PLANNER_SESSION_INTEGRATION.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-023).
+- Added `tests/test_planner_session_integration.py` (31 new tests) covering planning from a PlanningSession, identical output versus the legacy `create_plan()`/`add_step()` API, empty sessions, populated sessions, multiple goals, multiple constraints, immutable behavior (the session/goal/constraint/context are never mutated), the delegation path (same events fire; the resulting Plan is genuinely registered via `get_plan()`/`list_plans()`/`validate_plan()`), and error handling.
+
+### Changed
+
+- `argus/planner/interfaces.py`: `IPlanner` gained one new abstract method, `plan_session()`, plus two new Architectural Notes explaining why it is additive (not a replacement) and why its only `argus.planning` dependency is `PlanningSession` itself. Every pre-existing abstract method is unchanged.
+- `argus/planner/planner.py`: `Planner` gained `plan_session()` plus two private helpers (`_synthesize_intent_for_session()`, `_session_plan_metadata()`). Every pre-existing method's body is byte-for-byte unchanged; all 52 pre-existing tests in `tests/test_planner.py` pass with zero modification to that file.
+
+### Not Changed
+
+- **`argus/bootstrap.py` was intentionally left unchanged** - `Planner`'s constructor signature (`event_bus`, `capability_registry`) is unaffected; no new service, no new registration, no new lifecycle integration. "Bootstrap: No changes."
+- **`argus/events/event_types.py` was intentionally left unchanged** - no new `EventType` members; `plan_session()` reuses the pre-existing `PLAN_CREATED`/`PLAN_UPDATED` members via its delegated calls.
+- **`tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` were intentionally left unchanged** - no core service registration changed.
+- `argus/context/`, `argus/decision/`, `argus/planning/`, `argus/runtime/`, `argus/planner/plan.py`, `argus/planner/step.py`, `argus/planner/exceptions.py`, and `argus/planner/__init__.py` are all unchanged - per this package's own explicit Constraints ("modify Runtime," "modify Decision Engine," "modify Cognitive Context," "modify Planning Session" all forbidden).
+
+### ADR Update
+
+- Not applicable - this package introduces no `IService` adopter and does not affect `IPlanner`'s existing non-adoption. `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` was not modified.
+
+### Known Limitations
+
+- `PlanningGoal.name` doubles as `required_capability` - deterministic and documented, not a guarantee the name corresponds to a registered Capability; `validate_plan()` (called separately, never automatically by `plan_session()`) is what actually checks that.
+- `plan_session()` never calls `validate_plan()` - produces a `PlanStatus.CREATED` Plan, exactly like `create_plan()` alone would.
+- Goal `priority` still has no behavior beyond being copied into step metadata - steps always appear in the session's own goal call order.
+- Only `cognitive_context.context_id` is carried through for traceability - `memory_references`/`knowledge_references`/`reasoning_results`/`decision_references` are not read or reflected anywhere in the resulting Plan.
+- The Planner is still not automatically wired into the pipeline - `plan_session()` is available to any caller with a `PlanningSession` in hand, but no future-package-style automatic pipeline stage exists yet.
+- No AI, no optimization, no persistence, no concurrency - unchanged from Package 015.

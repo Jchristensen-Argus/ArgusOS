@@ -1,98 +1,98 @@
-# ArgusOS Implementation Report — Package 023: Planning Session
+# ArgusOS Implementation Report — Package 024: Planner Session Integration
 
 ## 1. Package Overview
 
-Package 023 adds `argus/planning/`, ArgusOS's first-generation Planning Session — an immutable transport object representing a single planning cycle, sitting between the Cognitive Context (Package 022) and the Planner in the target architecture. "A Planning Session represents a single planning cycle... It performs no planning. It executes no workflows. It is a transport object only." `PlanningSession` (an immutable value object: `session_id`, `cognitive_context`, `goals`, `constraints`, `metadata`), `PlanningGoal` (`goal_id`, `name`, `description`, `priority`), `PlanningConstraint` (`constraint_id`, `name`, `description`, `metadata`), and `PlanningMetadata` (`created_at`, `version`, `correlation_id`, `extra`) all hold pure data with no validation of their own. `cognitive_context`, `goals`, and `constraints` each hold actual objects — the live `CognitiveContext` (Package 022) itself, and actual `PlanningGoal`/`PlanningConstraint` objects — a deliberate contrast with `CognitiveContext`'s own three bare-identifier-string "..._references" fields, resolved the same way: by the work order's own field naming. `PlanningGoal.priority` is "descriptive only. No scheduling logic" — never read or acted on anywhere in this package; `goals` always preserves exact call order. `PlanningSessionBuilder` is a mutable, fluent builder implementing `IPlanningSessionBuilder` — `with_context`/`with_goal`/`with_constraint`/`with_metadata`/`build`. "Builder is mutable. PlanningSession is immutable. Each call to build() returns an independent immutable snapshot." Like Package 022 immediately before it, this package registers no new core service, publishes no new events, and leaves `argus/bootstrap.py` completely untouched — "This is not an IService... No service registration. No lifecycle integration. No EventBus changes." `IPlanningSessionBuilder` extends plain `ABC`, directly reusing `ICognitiveContextBuilder`'s (Package 022) own resolution for the identical question. `argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, and `argus/tests/test_bootstrap.py` were all left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them. All 1,237 pre-existing canonical tests still pass unchanged; 1,309 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (1,397 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
+Package 024 introduces `PlanningSession` awareness into the Planner while maintaining complete backward compatibility. "This package is an integration package. No planning behavior shall change. No plan generation shall change. No execution behavior shall change." Unlike Packages 022-023 (each a standalone, zero-dependency-on-existing-code addition), this package modifies an existing, already-shipped core service (`argus/planner/`) — the first such modification since Package 018. Exactly one new public method was added: `Planner.plan_session(planning_session: PlanningSession) -> Plan`, declared on `IPlanner` alongside every pre-existing method, all seven of which (`create_plan`, `add_step`, `remove_step`, `reorder_steps`, `validate_plan`, `get_plan`, `list_plans`) remain byte-for-byte unchanged. `plan_session()` synthesizes an `Intent(name=IntentType.UNKNOWN, confidence=0.0, ...)` (`PlanningSession` carries no `Intent` of its own anywhere in its structure, nor does the `CognitiveContext` it holds), then internally delegates to `self.create_plan()` followed by one `self.add_step()` call per `planning_session.goal` — "No duplicate planning logic": every `PLAN_CREATED`/`PLAN_UPDATED` event this produces is published by those two pre-existing methods themselves, not by `plan_session()` directly. Each `PlanningGoal` becomes one `PlanStep` (`description` falls back to `name` when empty; `required_capability` is the goal's `name`, its only other identifying field; `metadata` carries `goal_id`/`priority`); `PlanningConstraint`s are never turned into steps — each is recorded descriptively under the resulting Plan's own `metadata["constraints"]` instead. `plan_session()` raises the Planner's own pre-existing `InvalidPlanError` for malformed input — no new exception type was introduced. Per this package's own explicit Dependency Rules, `argus/planner/` now imports only `argus.planning.session.PlanningSession` — never `argus.planning.builder`, `argus.planning.metadata`, or `argus.planning.exceptions`. `argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, and every other core service package were left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them. All 52 pre-existing `tests/test_planner.py` tests pass with zero modification to that file — direct, automated proof of backward compatibility. 1,340 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (1,428 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
 
 ## 2. Repository Verification Note
 
-Before writing any code, the uploaded repository ("ArgusOS (22).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, verify HEAD/tag ancestry, run smoke validation").
+Before writing any code, the uploaded repository ("ArgusOS (23).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, verify HEAD/tag ancestry, run smoke validation").
 
-No anomaly was found — the ninth consecutive clean pre-flight (015-023). HEAD (`990370e`, "Synchronize repository version with v0.2.2 release") is a clean, single-commit descendant of tag `v0.2.2` (which points to `642e1b2`, "Implement Package 022 Cognitive Context"), confirmed via `git merge-base --is-ancestor v0.2.2 HEAD`; `v0.2.1` also confirmed an ancestor of HEAD. `git diff v0.2.2..HEAD --stat` shows exactly the expected one-line version-sync commit (`argus/bootstrap.py`, 1 insertion, 1 deletion) — no anomaly. `git status --short` showed a completely clean working tree. Every substantive check passed cleanly: Package 022 (`argus/context/`) present; `python -m pytest` passing (1325 passed, 38 subtests); `python -m unittest discover -s tests` passing (1237); `python -m unittest discover -s argus/tests` passing (64); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.2.2"` matching tag `v0.2.2`.
+No anomaly was found — the tenth consecutive clean pre-flight (015-024). HEAD (`5e39630`, "Synchronize repository version with v0.2.3 release") is a clean, single-commit descendant of tag `v0.2.3` (which points to `ef67b8e`, "Implement Package 023 Planning Session"), confirmed via `git merge-base --is-ancestor v0.2.3 HEAD`; `v0.2.2` also confirmed an ancestor of HEAD. `git diff v0.2.3..HEAD --stat` shows exactly the expected one-line version-sync commit (`argus/bootstrap.py`, 1 insertion, 1 deletion) — no anomaly. `git status --short` showed a completely clean working tree. Every substantive check passed cleanly: Package 023 (`argus/planning/`) present; `python -m pytest` passing (1397 passed, 38 subtests); `python -m unittest discover -s tests` passing (1309); `python -m unittest discover -s argus/tests` passing (64); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.2.3"` matching tag `v0.2.3`.
 
 Per the Founder's explicit release rules, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, push, or git-history modification of any kind was performed, `CORE_SERVICES_VERSION` was not changed by this package, and this package is not being reported as complete — final validation, integration, release, tagging, and git operations are the Founder's responsibility, to be performed against the live repository after independent regression testing.
 
 ## 3. Architectural Rationale
 
-No `design/specifications/PLANNING_SESSION.md` exists — the same situation as Packages 002, 009-022. Every structural decision traces to the Founder's explicit work order. The full rationale for each decision below is also recorded in `factory/packages/023_PLANNING_SESSION.md`'s "Architectural Decisions" section, in the source code's own module docstrings, and is only summarized here.
+No `design/specifications/PLANNER_SESSION_INTEGRATION.md` exists — the same situation as Packages 002, 009-023. Every structural decision traces to the Founder's explicit work order, which itself amends `factory/packages/015_PLANNER.md`'s own scope. The full rationale for each decision below is also recorded in `factory/packages/024_PLANNER_SESSION_INTEGRATION.md`'s "Architectural Decisions" section, in the source code's own module docstrings, and is only summarized here.
 
-**Decision 1 — `PlanningGoal.priority` is descriptive only; never read by this package.** `PlanningSession.goals` always preserves the exact order `with_goal()` was called in, regardless of `priority` — a deliberate contrast with `DecisionRule.priority` (Package 021), which `DecisionEngine` actively sorts by.
+**Decision 1 — `plan_session()` synthesizes an `Intent` rather than requiring one.** `create_plan()`'s own contract requires a real `Intent`; neither `PlanningSession` nor `CognitiveContext` carries one. Uses `IntentType.UNKNOWN`/`confidence=0.0` rather than fabricating a classification, matching `Intent`'s own "unrecognized input classifies as UNKNOWN" precedent; the session's `session_id`/`cognitive_context_id` are carried through in `parameters` for traceability.
 
-**Decision 2 — `PlanningMetadata` reuses `ContextMetadata`'s two-kinds-of-metadata reconciliation.** The second consecutive package to combine a generic "metadata" Responsibility with a dedicated Metadata section's named fields into one field (named fields + an open `extra` mapping).
+**Decision 2 — Goals become steps; constraints become metadata, never steps.** A `PlanningGoal` maps naturally onto a `PlanStep` (a unit of work); a `PlanningConstraint` describes a limit, which `PlanStep` has no field to represent. Constraints are recorded descriptively in `Plan.metadata` instead, preserving all information without distorting `PlanStep`'s own meaning.
 
-**Decision 3 — `PlanningSession` holds live objects, not reference strings — a deliberate contrast with Package 022.** `cognitive_context`/`goals`/`constraints` hold actual objects, resolved from the work order's own field naming (no "...references" language anywhere in this package, unlike Package 022's).
+**Decision 3 — `PlanningGoal.name` becomes `PlanStep.required_capability`.** The only other candidate PlanningGoal field capable of playing that role, since `required_capability` cannot be empty. Documented explicitly as a Known Limitation, not presented as a semantic guarantee.
 
-**Decision 4 — `PlanningSession`/`PlanningGoal`/`PlanningConstraint` perform no validation of their own.** Matches the "pure leaf" precedent; all validation lives in `PlanningSessionBuilder`.
+**Decision 4 — `InvalidPlanError` is reused; no new exception type.** Mirrors `create_plan()`'s own identical treatment of a non-`Intent` argument, satisfying "Planner shall NOT depend directly on: ... Exceptions" without inventing new vocabulary.
 
-**Decision 5 — `with_context()`/`with_metadata()` overwrite; `with_goal()`/`with_constraint()` accumulate.** `cognitive_context` is a scalar field (overwrite, last call wins); `goals`/`constraints` are collection fields (accumulate across calls).
-
-**Decision 6 — No new core service, no bootstrap changes, no `IService`.** Per this package's own explicit instruction, directly reusing `ICognitiveContextBuilder`'s (022) own resolution.
+**Decision 5 — `IPlanner` gains `plan_session()` as a new abstract method.** Matches this codebase's established discipline of keeping every interface's abstract method list exactly matching its implementation's public surface.
 
 ## 4. IService Adoption — Not Applicable
 
-This package introduces no `IService` adopter. `IPlanningSessionBuilder` extends plain `ABC`, per this package's own explicit "This is not an IService" instruction — the second consecutive package (after 022) for which this was settled before implementation began. `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` was not modified by this package; it records only `IService` adopters, and eleven remain the total count (unchanged from Package 022), seven genuinely gated.
+`IPlanner` did not inherit `IService` before this package and still does not — Planner's own lack of genuine multi-phase behavior (see `argus/planner/interfaces.py`'s pre-existing Architectural Note) is entirely unaffected by adding one more ungated, synchronous, in-memory method. `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` was not modified by this package.
 
 ## 5. Directory Tree (files touched)
 
 ```
 argus/
-    planning/
-        __init__.py                        (new)
-        session.py                         (new)
-        goal.py                            (new)
-        constraint.py                      (new)
-        metadata.py                        (new)
-        builder.py                         (new)
-        interfaces.py                      (new)
-        exceptions.py                      (new)
+    planner/
+        interfaces.py                       (modified)
+        planner.py                           (modified)
 factory/
     packages/
-        023_PLANNING_SESSION.md             (new)
-    ROADMAP.md                              (modified)
+        024_PLANNER_SESSION_INTEGRATION.md   (new)
+    ROADMAP.md                               (modified)
 tests/
-    test_planning_session.py                (new)
-    test_planning_builder.py                (new)
-    test_planning_goal.py                   (new)
-    test_planning_constraint.py             (new)
-    test_planning_metadata.py               (new)
-CHANGELOG.md                                (modified)
-DEVLOG.md                                   (modified)
-IMPLEMENTATION_REPORT.md                    (replaced — this file)
+    test_planner_session_integration.py      (new)
+CHANGELOG.md                                 (modified)
+DEVLOG.md                                    (modified)
+IMPLEMENTATION_REPORT.md                     (replaced — this file)
 ```
 
-No file outside this list was created, deleted, moved, or modified. Per this package's own explicit Constraints, `argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, `argus/context/`, `argus/decision/`, `argus/reasoning/`, `argus/knowledge_graph/`, `argus/memory_integration/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, `argus/connectors/`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, and every legacy pre-Factory file were left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them. `memory/memory_store.json` shows no diff — this package touches no disk-backed resource of any kind.
+No file outside this list was created, deleted, moved, or modified. Per this package's own explicit Constraints, `argus/bootstrap.py`, `argus/events/event_types.py`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, `argus/runtime/`, `argus/decision/`, `argus/context/`, `argus/planning/`, `argus/planner/plan.py`, `argus/planner/step.py`, `argus/planner/exceptions.py`, `argus/planner/__init__.py`, and `tests/test_planner.py` were left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them. `memory/memory_store.json` shows no diff — this package touches no disk-backed resource of any kind.
 
 ## 6. Integration Notes
 
-- `PlanningSession`/`PlanningSessionBuilder` are plain value objects a caller constructs directly (`PlanningSessionBuilder()`), exactly like `CognitiveContext` or `ReasoningQuery` — there is no service to look up, no Container registration, no Service Registry entry, and no Lifecycle Manager entry.
-- `argus/bootstrap.py` was not modified in any way — no new construction, no new import, no change to `_register_core_services`, no change to the Startup Sequence docstring, no change to `CORE_SERVICES_VERSION` (remains `"0.2.2"`).
-- `argus/events/event_types.py` was not modified — no new `EventType` members. "No EventTypes."
-- `tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` were not modified — no `CORE_SERVICE_NAMES` sync was needed or performed, since this package registers no core service.
-- Source-inspection confirms `argus/planning/*.py` contains no `import argus.planner`, `argus.runtime`, `argus.dispatcher`, `argus.plugins`, `argus.capability`, `argus.workflow`, `argus.connectors`, `argus.decision`, `argus.reasoning`, `argus.knowledge_graph`, or `argus.memory_integration` statement anywhere — the only cross-package import is `argus.context.context.CognitiveContext`, for typing/`with_context()`'s own type check only.
+- `Planner.plan_session()` is available immediately on every existing `Planner` instance — its constructor signature (`event_bus`, `capability_registry`) is completely unchanged, so no bootstrap change of any kind was needed or made.
+- `argus/bootstrap.py` was not modified in any way — no new construction, no new import, no change to `_register_core_services`, no change to `CORE_SERVICES_VERSION` (remains `"0.2.3"`).
+- `argus/events/event_types.py` was not modified — no new `EventType` members. `plan_session()` reuses the pre-existing `PLAN_CREATED`/`PLAN_UPDATED` members via its delegated `create_plan()`/`add_step()` calls.
+- `tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` were not modified — no core service registration changed.
+- Source-inspection confirms `argus/planner/*.py` contains exactly one new cross-package import — `argus.planning.session.PlanningSession` — added to `interfaces.py` and `planner.py`; neither `argus.planning.builder`, `argus.planning.metadata`, nor `argus.planning.exceptions` is imported, referenced, caught, or raised anywhere.
 
 ## 7. Test Results
+
+New integration suite:
+```
+python -m pytest tests/test_planner_session_integration.py -q
+31 passed in 0.04s
+```
+
+Backward compatibility verification (zero modification to this file):
+```
+python -m pytest tests/test_planner.py -q
+52 passed in 0.05s
+```
 
 Canonical suite (`tests/`):
 ```
 python -m unittest discover -s tests
-Ran 1309 tests in 0.107s
+Ran 1340 tests in 0.110s
 OK
 ```
 
 Per this package's explicit testing instruction:
 ```
 python -m pytest
-1397 passed, 38 subtests passed in 0.87s
+1428 passed, 38 subtests passed in 0.91s
 ```
 
 The duplicate `argus/tests/` also verified passing standalone (unaffected — not touched by this package):
 ```
 python -m unittest discover -s argus/tests -p "test_*.py"
-Ran 64 tests in 0.016s
+Ran 64 tests in 0.015s
 OK
 ```
 
-`pyflakes` on every new module: clean, no warnings.
+`pyflakes` on every new/modified module: clean, no warnings.
 
 `python main.py`:
 ```
@@ -103,84 +103,79 @@ Exit code 0.
 
 ## 8. Coverage Summary
 
-Measured with `coverage.py`, `python -m coverage run -m pytest`:
+Measured with `coverage.py`, `python -m coverage run --source=argus/planner -m pytest tests/test_planner.py tests/test_planner_session_integration.py`:
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/planning/__init__.py` | 8 | 0 | 100% |
-| `argus/planning/session.py` | 17 | 0 | 100% |
-| `argus/planning/goal.py` | 8 | 0 | 100% |
-| `argus/planning/constraint.py` | 12 | 0 | 100% |
-| `argus/planning/metadata.py` | 14 | 0 | 100% |
-| `argus/planning/builder.py` | 39 | 0 | 100% |
-| `argus/planning/interfaces.py` | 17 | 0 | 100% |
-| `argus/planning/exceptions.py` | 2 | 0 | 100% |
+| `argus/planner/__init__.py` | 6 | 0 | 100% |
+| `argus/planner/exceptions.py` | 5 | 0 | 100% |
+| `argus/planner/interfaces.py` | 22 | 0 | 100% |
+| `argus/planner/plan.py` | 25 | 0 | 100% |
+| `argus/planner/planner.py` | 102 | 0 | 100% |
+| `argus/planner/step.py` | 14 | 0 | 100% |
 
-Package 023 total (all `argus/planning/*`): 117 statements, 100% covered — no accepted gaps, reached on the first measurement with no post-hoc correction required. `argus/bootstrap.py`/`argus/events/event_types.py` are outside this package's coverage scope, since neither was modified. Full `argus/*` coverage: 99% (unchanged from Package 022; remaining gaps are pre-existing and out of scope).
+100% coverage across the entire `argus/planner/` package (174 statements, including every newly added line) — reached on the first measurement with no post-hoc correction required. Full `argus/*` coverage: 99% (unchanged from Package 023; remaining gaps are pre-existing and out of scope).
 
 ## 9. Engineering Decisions / Deviations from the Work Order
 
-- **`PlanningSession`/`PlanningGoal`/`PlanningConstraint` perform no validation of their own** — pure value objects, matching every prior value object's "pure leaf" precedent; all validation lives in `PlanningSessionBuilder`. See Section 3, Decision 4.
-- **`cognitive_context`/`goals`/`constraints` are typed as live objects, not reference strings** — resolved from the work order's own field naming (no "...references" language anywhere, unlike Package 022's), a deliberate contrast documented explicitly. See Section 3, Decision 3.
-- **`PlanningMetadata.extra` reuses `ContextMetadata`'s own reconciliation** of two separate work-order descriptions of "metadata" into one field — the second consecutive package to do so. See Section 3, Decision 2.
-- **`PlanningGoal`/`PlanningConstraint` field order deviates from the work order's literal listed order** (`name` placed before `goal_id`/`constraint_id` in each dataclass's own declaration) — the same "required fields before defaulted fields" reordering already applied to `Entity`, `ReasoningQuery`, and `DecisionRule`.
-- **`CORE_SERVICES_VERSION` remains `"0.2.2"`, unchanged by this package.**
-- **No `argus/tests/test_bootstrap.py` or `tests/test_bootstrap.py` change of any kind** — the second consecutive package (after 022) for which neither file required any edit, since this package registers no core service.
-- **No coverage gap required a post-hoc fix** — 100% was reached on the first `coverage run`, the third consecutive package (after 021 and 022) for which this was true on the initial measurement.
+- **A synthetic `Intent` is required and was not explicitly specified by the work order** — `create_plan()`'s own pre-existing contract requires a real `Intent`, and neither `PlanningSession` nor `CognitiveContext` supplies one; resolved by synthesizing `IntentType.UNKNOWN`/`confidence=0.0`, the same category of solution Package 016's own synthetic-Intent-per-step design used for a related problem. See Section 3, Decision 1.
+- **`PlanningGoal.name` doubles as `required_capability`** — a genuine, documented judgment call, not explicitly spelled out by the work order. See Section 3, Decision 3.
+- **`PlanningConstraint`s are recorded in `Plan.metadata`, never as `PlanStep`s** — resolved from `PlanStep`'s own existing shape having no field for "a limit," only for "a unit of work." See Section 3, Decision 2.
+- **No new exception type** — `InvalidPlanError` is reused for `plan_session()`'s own input validation, mirroring `create_plan()`'s existing treatment.
+- **`CORE_SERVICES_VERSION` remains `"0.2.3"`, unchanged by this package.**
+- **`tests/test_planner.py` required zero modification** — direct, automated proof that every pre-existing `IPlanner` method's behavior is unchanged.
+- **No coverage gap required a post-hoc fix** — 100% was reached on the first `coverage run` across the entire `argus/planner/` package, not just the newly added lines.
 
 ## 10. Known Limitations
 
-- **No lifecycle, no service registration** — `PlanningSession`/`PlanningSessionBuilder` carry no `IService` contract of any kind; nothing here is started, stopped, or has a status. See Section 3, Decision 6.
-- **No events** — this package publishes nothing. See Section 6.
-- **No persistence, no serialization** — a `PlanningSession` exists only in memory for as long as a caller holds a reference to it.
-- **No goal validation, no plan optimization, no workflow execution** — "It performs no planning. It executes no workflows."
-- **`PlanningGoal.priority` has no behavior** — descriptive only, never read or acted on anywhere in this package. See Section 3, Decision 1.
-- **`PlanningConstraint` carries no evaluable logic** — "No validation logic"; purely descriptive data.
-- **The Planner does not yet consume the Planning Session**, per this package's own explicit "Planner shall not consume Planning Session yet" Constraint.
-- No concurrency.
+- **`PlanningGoal.name` doubles as `required_capability`** — deterministic and documented, not a guarantee the name corresponds to a registered Capability; `validate_plan()` (called separately, never automatically by `plan_session()`) is what actually checks that.
+- **`plan_session()` never calls `validate_plan()`** — produces a `PlanStatus.CREATED` Plan, exactly like `create_plan()` alone would.
+- **Goal `priority` still has no behavior beyond being copied into step metadata** — steps always appear in the session's own goal call order, per Package 023's own "descriptive only" design.
+- **Only `cognitive_context.context_id` is carried through for traceability** — `memory_references`/`knowledge_references`/`reasoning_results`/`decision_references` are not read or reflected anywhere in the resulting Plan.
+- **The Planner is still not automatically wired into the pipeline** — `plan_session()` is available to any caller with a `PlanningSession` in hand, but no automatic pipeline stage exists yet, per this package's own explicit "Planner shall not consume Planning Session yet" scope (describing only the absence of automatic wiring, not a limitation of `plan_session()` itself).
+- No AI, no optimization, no persistence, no concurrency — unchanged from Package 015.
 - The repository's stray `argus/` duplicate tree and legacy pre-Factory files remain unresolved, out of scope per the Founder's explicit repository rules.
 
 ## 11. Repository-Derived Package Metrics (measured, not estimated)
 
-Measured via `git diff --stat` against the working tree's unmodified base commit `990370e` (no commit was made — see Section 2):
+Measured via `git diff --stat` against the working tree's unmodified base commit `5e39630` (no commit was made — see Section 2):
 
-- Files Created: 14 (8 `argus/planning/*.py`, `factory/packages/023_PLANNING_SESSION.md`, 5 new test files)
-- Files Modified: 4 (`factory/ROADMAP.md`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md` — this file, replaced)
-- Lines Added: 1,899 / Lines Removed: 68 (measured via `git diff --stat` across all 18 touched files, including this report's own replacement)
-- Unit Tests: 1,309 passing in canonical `tests/` (net +72 vs. Package 022's 1,237: +15 `test_planning_session.py`, +20 `test_planning_builder.py`, +9 `test_planning_goal.py`, +11 `test_planning_constraint.py`, +10 `test_planning_metadata.py`, +0 `test_bootstrap.py` — untouched, since no core service was registered)
-- Coverage: 100% (Package 023 modules), 99% (full `argus/*`)
-- Public Classes: 4 (`PlanningSession`, `PlanningGoal`, `PlanningConstraint`, `PlanningMetadata`)
-- Public Interfaces: 1 (`IPlanningSessionBuilder`, NOT extending `IService`)
-- New Dependencies: 0
+- Files Created: 2 (`factory/packages/024_PLANNER_SESSION_INTEGRATION.md`, `tests/test_planner_session_integration.py`)
+- Files Modified: 6 (`argus/planner/interfaces.py`, `argus/planner/planner.py`, `factory/ROADMAP.md`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md` — this file, replaced)
+- Lines Added: 1,204 / Lines Removed: 100 (measured via `git diff --stat` across all 8 touched files, including this report's own replacement)
+- Unit Tests: 1,340 passing in canonical `tests/` (net +31 vs. Package 023's 1,309: +31 `test_planner_session_integration.py`, +0 `test_planner.py` — unchanged, direct proof of backward compatibility)
+- Coverage: 100% (entire `argus/planner/` package), 99% (full `argus/*`)
+- Public Classes: 0 new (no new value objects — `plan_session()` is a method addition to the pre-existing `Planner` class)
+- Public Interfaces: 0 new (`IPlanner` gained one new abstract method, `plan_session()`)
+- New Dependencies: 1 (`argus.planning.session.PlanningSession`, the immutable contract only)
 - External Libraries: 0 (standard library only)
 - Architecture Deviations: 0 (see Section 9 for documented, non-architectural deviations)
 
 ## 12. Pre-Completion Checklist (per the Founder's explicit checklist)
 
-- ✓ **Bootstrap was intentionally left unchanged** — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; no construction, no Container registration, no Lifecycle Manager entry, no `CORE_SERVICES_VERSION` change. Per this package's own explicit "No service registration. No lifecycle integration. No EventBus changes" Constraint.
-- ✓ **No new core service** — `PlanningSession`/`PlanningSessionBuilder` are plain value objects; no `IService` implementation exists in this package.
-- ✓ **No new events** — confirmed via `git diff --stat -- argus/events/event_types.py` showing zero lines changed.
-- ✓ **No Planner/Decision Engine/Reasoning Engine/Cognitive Context changes** — confirmed via `git diff --stat -- argus/planner argus/decision argus/reasoning argus/context` showing zero lines changed in all four.
-- ✓ **Builder chaining and validation** — confirmed via `tests/test_planning_builder.py`'s `PlanningSessionBuilderChainingTests` and `PlanningSessionBuilderValidationTests` classes.
-- ✓ **Immutability** — confirmed via `tests/test_planning_session.py::PlanningSessionImmutabilityTests`, `tests/test_planning_goal.py::PlanningGoalTests::test_immutability`, `tests/test_planning_constraint.py::PlanningConstraintTests::test_immutability`, and `tests/test_planning_metadata.py::PlanningMetadataTests::test_immutability`.
-- ✓ **Equality semantics** — confirmed via `tests/test_planning_session.py::PlanningSessionEqualityTests` and the equality/inequality tests in each of the other four test files.
-- ✓ **Empty and populated sessions, multiple goals, multiple constraints** — confirmed via `PlanningSessionEmptyTests`/`PlanningSessionPopulatedTests` (direct construction) and `PlanningSessionBuilderEmptyTests`/`PlanningSessionBuilderChainingTests` (via builder).
-- ✓ **Regression suite passes** — `python -m unittest discover -s tests` reports `Ran 1309 tests ... OK`; `python -m pytest` reports `1397 passed, 38 subtests passed`.
+- ✓ **Bootstrap remains unchanged** — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; `Planner`'s constructor signature is unaffected. Per this package's own explicit "Bootstrap: No changes" Constraint.
+- ✓ **No new core service, no new events, no lifecycle changes** — confirmed via `git diff --stat -- argus/events/event_types.py` showing zero lines changed; `IPlanner` still does not inherit `IService`.
+- ✓ **No Runtime/Decision Engine/Cognitive Context/Planning Session changes** — confirmed via `git diff --stat -- argus/runtime argus/decision argus/context argus/planning` showing zero lines changed in all four.
+- ✓ **Backward compatibility** — confirmed via `python -m pytest tests/test_planner.py -q` (52 passed) with zero modification to that file.
+- ✓ **Delegation strategy verified** — confirmed via `tests/test_planner_session_integration.py::DelegationPathTests` (same events fire; the resulting Plan is genuinely registered and independently retrievable via `get_plan()`/`list_plans()`/`validate_plan()`).
+- ✓ **Identical output versus legacy API** — confirmed via `tests/test_planner_session_integration.py::IdenticalOutputVersusLegacyApiTests`.
+- ✓ **Empty session, populated session, multiple goals, multiple constraints, immutable behavior, error handling** — confirmed via the corresponding dedicated test classes in `tests/test_planner_session_integration.py`.
+- ✓ **Regression suite passes** — `python -m unittest discover -s tests` reports `Ran 1340 tests ... OK`; `python -m pytest` reports `1428 passed, 38 subtests passed`.
 - ✓ **`python main.py` starts cleanly** — exit code 0.
-- ✓ **`pyflakes` clean** — no warnings on any new module.
+- ✓ **`pyflakes` clean** — no warnings on any new/modified module.
 - ✓ **No unintended repository modifications** — confirmed via `git status`/`git diff --stat`.
-- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.2.2"`.
-- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `990370e`).
-- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.0.3`-`v0.2.2`, plus `charter-v1.0`).
+- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.2.3"`.
+- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `5e39630`).
+- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.0.3`-`v0.2.3`, plus `charter-v1.0`).
 - ✓ **Repository ready for architectural review** — all regression, smoke, and pyflakes checks pass locally; final integration, version bump, commit, and tag remain the Founder's responsibility.
 
 ## 13. Concise Implementation Summary
 
-Package 023 adds `argus/planning/`: `PlanningSession`/`PlanningGoal`/`PlanningConstraint`/`PlanningMetadata` (immutable value objects) and `PlanningSessionBuilder` (a mutable, fluent builder implementing `IPlanningSessionBuilder`), carrying one planning cycle's CognitiveContext, goals, constraints, and metadata forward. `cognitive_context`/`goals`/`constraints` hold actual objects, not reference strings — a deliberate contrast with `CognitiveContext`'s own bare-identifier-string fields, resolved by the work order's own field naming. `PlanningGoal.priority` is descriptive only, never read or acted on; `goals` always preserves exact call order. `PlanningSessionBuilder`'s `with_goal()`/`with_constraint()` accumulate across calls; `with_context()` and repeated `with_metadata()` calls on the same key overwrite (last call wins). `build()` performs no additional validation and returns an independent snapshot every time it is called. Like Package 022 immediately before it, this package registers no new core service, publishes no new events, and leaves `argus/bootstrap.py` completely untouched — "This is not an IService... No service registration. No lifecycle integration. No EventBus changes." `IPlanningSessionBuilder` extends plain `ABC`, directly reusing `ICognitiveContextBuilder`'s (022) own resolution. The Planner does not yet consume the Planning Session, per explicit Version 1 scope limit. 1,309 tests pass in `tests/` (`python -m pytest` also passes: 1,397 passed, 38 subtests), 100% coverage across all Package 023 modules, reached on the first measurement. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
+Package 024 adds `Planner.plan_session(planning_session: PlanningSession) -> Plan`, declared on `IPlanner` alongside every pre-existing method, all of which remain byte-for-byte unchanged. `plan_session()` synthesizes an `Intent(name=IntentType.UNKNOWN, confidence=0.0, ...)` (neither `PlanningSession` nor `CognitiveContext` carries one) and internally delegates to `self.create_plan()` followed by one `self.add_step()` call per goal — "No duplicate planning logic": every event this produces is published by those two pre-existing methods themselves. Each `PlanningGoal` becomes one `PlanStep` (`required_capability` derived from the goal's `name`, its only other identifying field); `PlanningConstraint`s are recorded descriptively in the resulting Plan's own `metadata`, never as steps, since `PlanStep` has no field to represent a limit. `plan_session()` raises the Planner's own pre-existing `InvalidPlanError` for malformed input — no new exception type. `argus/planner/` now imports only `argus.planning.session.PlanningSession`, never `argus.planning.builder`/`metadata`/`exceptions`, per this package's own explicit Dependency Rules. `argus/bootstrap.py`, `argus/events/event_types.py`, and every other core service package are completely untouched. All 52 pre-existing `tests/test_planner.py` tests pass with zero modification to that file — direct, automated proof of backward compatibility. 1,340 tests pass in `tests/` (`python -m pytest` also passes: 1,428 passed, 38 subtests), 100% coverage across the entire `argus/planner/` package, reached on the first measurement. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
 
 ## 14. Architectural Observations
 
-- This is the second consecutive package (after 022) for which "should this be an `IService`" was settled by explicit instruction before implementation began rather than derived from ADR-0002's criterion or a fresh adoption instruction — and the resolution required no new reasoning at all, only confirming `IPlanningSessionBuilder` belongs in the same category `ICognitiveContextBuilder` already established. Two consecutive non-adopting packages is itself a data point: this codebase's cognitive-pipeline transport objects (Cognitive Context, Planning Session) are emerging as a distinct architectural category from its core services, one the Founder appears to be deliberately keeping free of lifecycle machinery.
-- The "live objects vs. reference identifiers" question (Section 3, Decision 3) is the direct inverse of Package 022's own defining design choice, and resolving it confirmed something useful about that Constraint's actual mechanics: "shall NOT mutate contained objects" turns out to be satisfiable by either route (bare strings with nothing to mutate, or objects that are themselves already immutable) — the deciding factor is not "reference vs. object" in the abstract, but simply whether the held type happens to be mutable. `CognitiveContext` happens not to be, which is what makes holding it directly here just as safe as holding bare strings was in Package 022.
-- `PlanningMetadata`'s reuse of `ContextMetadata`'s own two-kinds-of-metadata reconciliation (Section 3, Decision 2), now applied identically twice in a row, is worth flagging as an emerging, reusable codebase convention rather than a coincidence: any future package whose work order separately describes "arbitrary metadata" and a list of specific named metadata fields should very likely reach for the same named-fields-plus-`extra` shape without re-deriving it.
-- The "currently-unowned architectural gap" flagged in Packages 011 through 022's own reports — nothing yet takes a raw user message all the way through classification, planning, execution, and external communication automatically — remains open after this package. ArgusOS now has a complete, working path from Memory through Knowledge, Reasoning, Cognitive Context, and deterministic Decision-making, plus a second transport object capable of carrying a planning cycle's own goals and constraints forward — though the Planner's own explicit non-consumption of both the Cognitive Context and now the Planning Session (per each package's own Version 1 scope limit) means that path still terminates one step short of actually reaching the component both abstractions are named for.
+- This is the first package since 018 to modify an existing, already-shipped core service rather than introduce a standalone new one — and the discipline that made it safe was the same discipline every prior package already used for its own new code: exhaustive smoke-testing before formal tests, a dedicated backward-compatibility check (running the pre-existing suite unmodified), and an explicit "identical output versus legacy API" test rather than trusting that delegation was correct by inspection alone.
+- The synthetic-`Intent` resolution (Section 3, Decision 1) is now the second time this exact category of problem — "a downstream method requires a value the upstream data model doesn't actually carry" — has arisen in this codebase, after Package 016's own synthetic-Intent-per-step solution for `IIntentDispatcher.dispatch()`. Both times, the resolution was the same shape: reuse an existing "no real classification" convention (`IntentType.UNKNOWN`) rather than inventing new default-guessing behavior, and preserve traceability by passing real identifying data through an already-existing field rather than adding a new one. Worth recognizing as a reusable pattern for any future package facing a similar gap between two components' own data models.
+- The "goals become steps, constraints become metadata" resolution (Section 3, Decision 2) is a useful precedent for future work extending `PlanningSession`'s own influence over planning: not every field of an upstream transport object needs - or should - map onto the same downstream structure. Recognizing that `PlanStep` and `PlanningConstraint` represent categorically different concepts (an action vs. a limit) and choosing not to force a mapping that doesn't fit is the same restraint this codebase has shown before (for example, Package 018's Knowledge Graph declining to implement graph algorithms before Package 020 was explicitly asked to).
+- The "currently-unowned architectural gap" flagged in Packages 011 through 023's own reports — nothing yet takes a raw user message all the way through classification, planning, execution, and external communication automatically — narrows slightly after this package: the Planner can now genuinely accept a `PlanningSession` as input, closing the one gap in the pipeline that was purely a missing capability rather than a deliberate Version 1 scope limit. What remains open is entirely about automatic wiring - no future package has yet been asked to have the Reasoning Engine/Cognitive Context/Planning Session chain actually call `plan_session()` without a human or calling code doing so explicitly.

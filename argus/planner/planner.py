@@ -8,7 +8,12 @@ Purpose:
     factory/packages/015_PLANNER.md. The Planner performs reasoning
     only - it never executes a workflow, never dispatches an action,
     and never calls a plugin. Execution remains entirely outside this
-    package, per this package's explicit Objective.
+    package, per this package's explicit Objective. Also implements
+    plan_session(), a second, additive entry point that builds a Plan
+    from a PlanningSession by delegating to the exact same
+    create_plan()/add_step() methods below, per
+    factory/packages/024_PLANNER_SESSION_INTEGRATION.md - see this
+    module's own "plan_session()" section further down.
 
 Responsibilities:
     - create_plan / add_step / remove_step / reorder_steps /
@@ -41,6 +46,52 @@ Responsibilities:
       invokes anything the Capability Registry describes. A Plan with
       no steps validates successfully (vacuously true).
 
+plan_session() - Delegation, Not A Second Algorithm (Package 024):
+    plan_session(planning_session) does exactly three things, in
+    order, and nothing else: (1) synthesize an Intent from the
+    session (PlanningSession carries no Intent of its own anywhere in
+    its structure - see _synthesize_intent()'s own docstring), (2)
+    call self.create_plan() with that Intent, and (3) call
+    self.add_step() once per planning_session.goal, in order. Every
+    event this produces (PLAN_CREATED, one PLAN_UPDATED per goal) is
+    published by create_plan()/add_step() themselves, exactly as it
+    would be for any other caller of those two methods -
+    plan_session() itself publishes nothing directly. This is what
+    "No duplicate planning logic" means concretely: there is no
+    second, parallel implementation of "how a Plan gets built," only
+    a second, higher-level way to invoke the one that already existed.
+
+Goal-to-Step and Constraint-to-Metadata Mapping (Package 024):
+    Each PlanningGoal becomes one PlanStep: `description` is the
+    goal's own `description` if non-empty, else its `name` (PlanStep
+    .description must be a non-empty string per add_step()'s own
+    validation, but PlanningGoal.description defaults to ""); `
+    required_capability` is the goal's `name` - PlanningGoal has no
+    field more specifically analogous to "which Capability satisfies
+    this," so its one other identifying string field is the most
+    direct, deterministic choice, the same category of "derive an id
+    from an existing field rather than inventing new state" resolution
+    Package 019's MemoryMapper (f"memory:{key}") and Package 016's
+    synthetic-Intent-per-step both used for a related problem. `order`
+    is assigned by add_step() itself, exactly as it always is.
+    `optional` defaults to False, matching add_step()'s own default -
+    PlanningGoal carries no equivalent concept. `metadata` carries the
+    goal's own `goal_id` and `priority`, so neither is silently
+    dropped even though neither has a direct PlanStep field.
+    PlanningConstraints are never turned into PlanSteps at all - a
+    constraint describes a limit, not an action to take, which is not
+    what a PlanStep represents - instead, every constraint's
+    `constraint_id`/`name`/`description` is recorded as a plain,
+    descriptive list under the created Plan's own
+    `metadata["constraints"]`, alongside `metadata
+    ["planning_session_id"]` (always present) and
+    `metadata["cognitive_context_id"]` (present only when
+    planning_session.cognitive_context is not None). A session with no
+    goals and no constraints produces a Plan with zero steps and an
+    empty `constraints` list in its metadata - the same "vacuously
+    fine, nothing to check" treatment validate_plan() already gives an
+    empty Plan.
+
 Capability Integration:
     The one and only touchpoint with the Capability Registry is
     validate_plan()'s read-only `ICapabilityRegistry.contains()` call.
@@ -64,23 +115,33 @@ Non-Responsibilities:
     - No AI, no LLM, no networking, no persistence - Plans are held
       only in memory, exactly like CapabilityRegistry's Capabilities
       and PluginManager's Plugins.
+    - plan_session() never modifies the PlanningSession it is given,
+      or that session's own cognitive_context, goals, or constraints -
+      every one of those is already an immutable value object
+      (Packages 022/023), so this is true by construction, not by
+      anything this module does to enforce it. plan_session() imports
+      only argus.planning.session.PlanningSession - never
+      argus.planning.builder, argus.planning.metadata, or
+      argus.planning.exceptions, per this package's own explicit
+      Dependency Rules.
 
 Dependencies:
     argus.planner (Plan, PlanStatus, PlanStep, IPlanner, and the
     planner exceptions), argus.capability.interfaces (ICapabilityRegistry,
     for validate_plan()'s read-only existence check only),
     argus.intent.intent (Intent), argus.events (Event, EventType,
-    IEventBus).
+    IEventBus), argus.planning.session (PlanningSession) - Package
+    024, the immutable contract only, for plan_session().
 """
 
 import dataclasses
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from argus.capability.interfaces import ICapabilityRegistry
 from argus.events.event import Event
 from argus.events.event_types import EventType
 from argus.events.interfaces import IEventBus
-from argus.intent.intent import Intent
+from argus.intent.intent import Intent, IntentType
 from argus.planner.exceptions import (
     InvalidPlanError,
     PlanNotFoundError,
@@ -90,6 +151,7 @@ from argus.planner.exceptions import (
 from argus.planner.interfaces import IPlanner
 from argus.planner.plan import Plan, PlanStatus
 from argus.planner.step import PlanStep
+from argus.planning.session import PlanningSession
 
 
 class Planner(IPlanner):
@@ -111,6 +173,24 @@ class Planner(IPlanner):
         self._event_bus = event_bus
         self._capability_registry = capability_registry
         self._plans: Dict[str, Plan] = {}
+
+    def plan_session(self, planning_session: PlanningSession) -> Plan:
+        if not isinstance(planning_session, PlanningSession):
+            raise InvalidPlanError(
+                f"plan_session() requires a PlanningSession, got {planning_session!r}."
+            )
+        intent = self._synthesize_intent_for_session(planning_session)
+        plan = self.create_plan(
+            intent, metadata=self._session_plan_metadata(planning_session)
+        )
+        for goal in planning_session.goals:
+            plan = self.add_step(
+                plan.id,
+                description=goal.description or goal.name,
+                required_capability=goal.name,
+                metadata={"goal_id": goal.goal_id, "priority": goal.priority},
+            )
+        return plan
 
     def create_plan(self, intent: Intent, *, metadata: Optional[dict] = None) -> Plan:
         if not isinstance(intent, Intent):
@@ -227,6 +307,38 @@ class Planner(IPlanner):
         return tuple(self._plans.values())
 
     # -- internals ------------------------------------------------------
+
+    def _synthesize_intent_for_session(self, planning_session: PlanningSession) -> Intent:
+        # PlanningSession carries no Intent anywhere in its own
+        # structure (nor does the CognitiveContext it holds) - there
+        # is nothing here to classify, so this deliberately uses
+        # IntentType.UNKNOWN with confidence=0.0 rather than fabricate
+        # a classification the session never actually contained,
+        # matching Intent's own "Unrecognized input always classifies
+        # as UNKNOWN" precedent. The session's own session_id (and,
+        # when present, its cognitive_context's context_id) are
+        # carried through in `parameters` for traceability, the same
+        # "pass real identifying data through an existing field"
+        # approach Package 016's own synthetic-Intent-per-step
+        # solution used.
+        parameters: Dict[str, Any] = {"planning_session_id": planning_session.session_id}
+        if planning_session.cognitive_context is not None:
+            parameters["cognitive_context_id"] = planning_session.cognitive_context.context_id
+        return Intent(name=IntentType.UNKNOWN, confidence=0.0, parameters=parameters)
+
+    def _session_plan_metadata(self, planning_session: PlanningSession) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {"planning_session_id": planning_session.session_id}
+        if planning_session.cognitive_context is not None:
+            metadata["cognitive_context_id"] = planning_session.cognitive_context.context_id
+        metadata["constraints"] = tuple(
+            {
+                "constraint_id": constraint.constraint_id,
+                "name": constraint.name,
+                "description": constraint.description,
+            }
+            for constraint in planning_session.constraints
+        )
+        return metadata
 
     def _require_plan(self, plan_id: str) -> Plan:
         if not isinstance(plan_id, str):

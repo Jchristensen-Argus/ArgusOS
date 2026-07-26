@@ -3,7 +3,8 @@ Public interface contract for the ArgusOS Planner.
 
 Purpose:
     Define IPlanner, the contract other modules depend on, per
-    factory/packages/015_PLANNER.md.
+    factory/packages/015_PLANNER.md and
+    factory/packages/024_PLANNER_SESSION_INTEGRATION.md.
 
 Architectural Note - Why IPlanner Does NOT Inherit IService:
     Unlike Scheduler, IntentRouter, WorkflowEngine, ConversationManager,
@@ -27,6 +28,35 @@ Architectural Note - Why IPlanner Does NOT Inherit IService:
     Lifecycle Manager as LifecycleState.REGISTERED only, exactly like
     those four, not as a fully-lifecycled IService adopter.
 
+Architectural Note - plan_session() Is An Additional Entry Point,
+Not A Replacement (Package 024):
+    "The Planner shall now recognize PlanningSession as a first-class
+    input... This package introduces an additional interface - not a
+    replacement." `plan_session()` is a second, higher-level way to
+    reach the exact same planning logic `create_plan()`/`add_step()`
+    already provide - it extracts the required information from a
+    `PlanningSession` and internally delegates to those same two
+    methods, rather than reimplementing anything. "No duplicate
+    planning logic." Every pre-existing IPlanner method - including
+    `create_plan()` itself - continues to function exactly as it did
+    before this package; `plan_session()` is purely additive. See
+    argus.planner.planner.Planner's own module docstring for the full
+    goal-to-step and constraint-to-metadata mapping this method
+    applies, and factory/packages/024_PLANNER_SESSION_INTEGRATION.md
+    for the complete architectural rationale.
+
+Architectural Note - Dependency Boundary: PlanningSession Only, Not
+Builder/Metadata/Exceptions (Package 024):
+    Per this package's own explicit Dependency Rules, this module
+    imports only `argus.planning.session.PlanningSession` - never
+    `argus.planning.builder`, `argus.planning.metadata`, or
+    `argus.planning.exceptions`. `plan_session()` raises this
+    package's own pre-existing `InvalidPlanError` for malformed input,
+    exactly the same exception `create_plan()` already raises for a
+    non-`Intent` argument - no new exception type was introduced, and
+    none of `argus.planning`'s own exception types are ever caught,
+    raised, or referenced here. "Use only the immutable contract."
+
 Responsibilities:
     - IPlanner: create_plan / validate_plan / add_step / remove_step /
       reorder_steps / get_plan / list_plans.
@@ -42,7 +72,10 @@ Non-Responsibilities:
 
 Dependencies:
     argus.planner.plan (Plan), argus.planner.step (PlanStep),
-    argus.intent.intent (Intent).
+    argus.intent.intent (Intent),
+    argus.planning.session (PlanningSession) - Package 024, the
+    immutable contract only (see this module's own Architectural
+    Note).
 """
 
 from abc import ABC, abstractmethod
@@ -50,6 +83,7 @@ from typing import Optional, Sequence
 
 from argus.intent.intent import Intent
 from argus.planner.plan import Plan
+from argus.planning.session import PlanningSession
 
 
 class IPlanner(ABC):
@@ -64,6 +98,24 @@ class IPlanner(ABC):
         Note for why this interface is a plain ABC rather than an
         IService.
     """
+
+    @abstractmethod
+    def plan_session(self, planning_session: PlanningSession) -> Plan:
+        """Create and populate a Plan from a PlanningSession, by
+        internally delegating to create_plan()/add_step() - no
+        duplicate planning logic. Each of planning_session.goals
+        becomes one PlanStep (see planner.py's own module
+        docstring for the exact mapping);
+        planning_session.constraints are recorded descriptively in
+        the returned Plan's own metadata, never as steps. Never
+        modifies planning_session, its cognitive_context, its goals,
+        or its constraints - every one of those is already an
+        immutable value object, so this is true by construction, not
+        by added policy. Raises InvalidPlanError if planning_session
+        is not a PlanningSession instance. See this module's own
+        Architectural Notes for why this is an additional entry point
+        rather than a replacement, and why this method's only
+        argus.planning dependency is PlanningSession itself."""
 
     @abstractmethod
     def create_plan(self, intent: Intent, *, metadata: Optional[dict] = None) -> Plan:
