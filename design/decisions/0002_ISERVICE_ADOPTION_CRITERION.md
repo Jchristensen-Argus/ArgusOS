@@ -726,3 +726,96 @@ combined decision as the ADR's current text implicitly does. This ADR's
 Status remains `Proposed`, per standing instruction; only the
 Founder/Architect elevates it to `Accepted`, revises its text, or opens
 the follow-up package.
+
+## Empirical Finding (Package 020 - Reasoning Engine)
+
+`IReasoningEngine`, per the Founder's Package 020 work order, DOES
+inherit `IService` - again an explicit instruction, not this
+Engineer's own judgment call. Applying ADR-0002's criterion
+independently to this package's actual methods, however, would NOT
+have suggested adoption on its own - the same divergence Package 018's
+Knowledge Graph exhibited, and the direct opposite of Package 019's
+Memory Integration, where explicit instruction and the criterion's own
+conclusion agreed. All six public methods (`query()`, `neighbors()`,
+`find_paths()`, `related_entities()`, `entity_summary()`,
+`relationship_summary()`) are synchronous, read-only, in-memory
+operations over an already-injected `IKnowledgeGraph` (and, for
+metadata enrichment only, `IMemoryIntegration.synchronization_status()`
+- itself already ungated) - no external call, no dispatch, no write,
+and no phase distinction any of them could plausibly be gated on. "It
+does not make decisions. It does not execute plans. It performs
+deterministic reasoning only," per this package's own Objective. This
+is architecturally much closer to `KnowledgeGraph` (Package 018) and
+`IntentRouter` (Package 009) - both zero-gated adopters - than to
+`MemoryIntegration` (Package 019), `AgentRuntime` (Package 016), or
+`ConnectorManager` (Package 017), whose genuinely gated methods each
+perform effectful, stateful cross-system coordination or external I/O
+that reading an already-populated, in-memory graph does not.
+`ReasoningEngine` therefore implements the full IService lifecycle
+boilerplate (`initialize()`/`start()`/`stop()`/`status()`) but gates
+none of its own six public methods - exactly mirroring `KnowledgeGraph`'s
+(Package 018) and `IntentRouter`'s (Package 009) identical shape,
+making `ReasoningEngine` the **third** IService adopter in this
+codebase with zero gated methods.
+
+This package's finding also directly answers the question Package
+019's finding raised about separating "adoption" from "gating" as
+formally distinct questions - not by revising the ADR's text (still
+not this Engineer's call), but by supplying a second real data point
+for the divergent case: Packages 018 and 020 both show an explicit
+"Extend IService" instruction paired with a criterion that
+independently concludes "gate nothing," while Package 019 shows the
+same explicit-instruction shape paired with a criterion that
+independently concludes "gate the effectful methods." Directed
+adoption (whether a class implements `IService`) and derived gating
+(which specific methods are gated on `RUNNING`) continue to behave as
+genuinely separable questions across four consecutive explicitly-
+directed adopters (018, 019, 020, and - by extension - any future
+package that states "Extend IService" outright): the instruction
+settles the first question; this Engineer's own application of
+ADR-0002's criterion, unchanged by which route led to `IService`
+inheritance, continues to settle the second.
+
+A distinct, unrelated design point also surfaced in this package,
+worth recording separately from the adoption question itself: this
+package's own Bootstrap section lists Memory Integration as a
+dependency alongside Knowledge Graph, and its Objective states the
+Reasoning Engine "consumes information from... Memory Integration" -
+stronger language than Package 018's own "the Planner *may* consult
+the Knowledge Graph" (a future capability, deliberately left
+unexercised at the time). Rather than leaving the injected
+`IMemoryIntegration` unused (which would have contradicted the
+Objective's own literal text) or reaching into `MemoryMapper`'s private
+`f"memory:{key}"` id-derivation scheme (which would have created a
+hidden, fragile coupling to another package's implementation detail),
+this Engineer resolved the tension by having every public method
+attach `IMemoryIntegration.synchronization_status()`'s own snapshot to
+its `ReasoningResult.metadata`, read-only and unconditionally - see
+`argus/reasoning/engine.py`'s own Architectural Decision for the full
+reasoning. This is a dependency-usage judgment call, not an
+adoption-criterion question, and does not itself bear on ADR-0002 -
+recorded here only because it was discovered in the course of this
+same package's IService integration work.
+
+Ten adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, and now ReasoningEngine), seven of
+which are genuinely gated (all but IntentRouter, KnowledgeGraph, and
+ReasoningEngine). Ten core services exist that do not implement
+`IService` at all (Configuration, the Logger, the Event Bus, the
+Service Registry, the Lifecycle Manager, Knowledge Service, Memory
+Service, Capability Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for ten adopters rather than nine. This package's
+finding, read alongside Packages 018 and 019, further strengthens the
+case that ADR-0002 could usefully be revised to formally separate
+"adoption" (whether a class implements `IService` - which may be
+directed or derived) from "gating" (which specific methods are gated
+on `RUNNING` - which remains this Engineer's own criterion-driven
+judgment call regardless of how adoption was decided), now backed by
+three consecutive directed-adoption data points (two divergent, one
+convergent) rather than two. This ADR's Status remains `Proposed`, per
+standing instruction; only the Founder/Architect elevates it to
+`Accepted`, revises its text, or opens the follow-up package.

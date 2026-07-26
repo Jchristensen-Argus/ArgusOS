@@ -28,6 +28,7 @@
 - [x] Connector Framework (Connector, IConnector, IConnectorManager, ConnectorManager, MockConnector, Package 017)
 - [x] Knowledge Graph (Entity, Relationship, IKnowledgeGraph, KnowledgeGraph, Package 018)
 - [x] Memory Integration (MemoryMapper, IMemoryIntegration, MemoryIntegration, Package 019)
+- [x] Reasoning Engine (ReasoningQuery, ReasoningResult, IReasoningEngine, ReasoningEngine, Package 020)
 
 ---
 

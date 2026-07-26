@@ -28,6 +28,7 @@ CORE_SERVICE_NAMES = (
     "planner",
     "knowledge_graph",
     "memory_integration",
+    "reasoning_engine",
     "agent_runtime",
     "connector_manager",
 )

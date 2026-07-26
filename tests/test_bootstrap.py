@@ -8,6 +8,7 @@ from argus.capability import ICapabilityRegistry, CapabilityRegistry
 from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
+from argus.reasoning import IReasoningEngine, ReasoningEngine
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -40,6 +41,7 @@ CORE_SERVICE_NAMES = (
     "planner",
     "knowledge_graph",
     "memory_integration",
+    "reasoning_engine",
     "agent_runtime",
     "connector_manager",
 )
@@ -394,6 +396,60 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(knowledge_graph.get_entity(entity_id).name, test_key)
             finally:
                 memory_service.delete(test_key)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_reasoning_engine_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("reasoning_engine"))
+            reasoning_engine = application.container.resolve("reasoning_engine")
+            self.assertIsInstance(reasoning_engine, IReasoningEngine)
+            self.assertIsInstance(reasoning_engine, ReasoningEngine)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_reasoning_engine_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            reasoning_engine = application.container.resolve("reasoning_engine")
+            self.assertEqual(reasoning_engine.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("reasoning_engine"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_reasoning_engine_queries_knowledge_graph_end_to_end(self):
+        # Unlike the Memory Integration end-to-end test above,
+        # ReasoningEngine and KnowledgeGraph are both purely in-memory
+        # (see Package 018's and this package's own Objective) - no
+        # disk-backed resource is touched, so no cleanup is required.
+        from argus.knowledge_graph import Entity, Relationship
+        from argus.reasoning import ReasoningQuery
+
+        application = bootstrap()
+
+        try:
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            reasoning_engine = application.container.resolve("reasoning_engine")
+
+            alice = Entity(entity_type="person", name="Alice")
+            bob = Entity(entity_type="person", name="Bob")
+            knowledge_graph.add_entity(alice)
+            knowledge_graph.add_entity(bob)
+            knowledge_graph.add_relationship(
+                Relationship(source_entity_id=alice.id, target_entity_id=bob.id, relationship_type="knows")
+            )
+
+            result = reasoning_engine.query(ReasoningQuery(entity_id=alice.id))
+            self.assertEqual(result.matched_entities, (alice, bob))
+
+            neighbors_result = reasoning_engine.neighbors(alice.id)
+            self.assertEqual(neighbors_result.matched_entities, (bob,))
         finally:
             application.shutdown()
 

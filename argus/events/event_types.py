@@ -299,3 +299,27 @@ class EventType(Enum):
     MEMORY_SYNCHRONIZED = "memory_synchronized"
     MEMORY_DESYNCHRONIZED = "memory_desynchronized"
     MEMORY_MAPPING_FAILED = "memory_mapping_failed"
+
+    # Added by Package 020 - Reasoning Engine, per this module's own
+    # "single place new event types are added" scope note above.
+    # ReasoningEngine publishes these on the existing Event Bus (see
+    # argus/reasoning/engine.py). Every one of the six public methods
+    # (query/neighbors/find_paths/related_entities/entity_summary/
+    # relationship_summary) publishes exactly one of two mutually
+    # exclusive outcomes per call: on success,
+    # REASONING_QUERY_EXECUTED fires first - marking that the
+    # underlying read-only Knowledge Graph (and, for metadata only,
+    # Memory Integration) calls completed - immediately followed by
+    # REASONING_RESULT_CREATED, marking that a structured
+    # ReasoningResult was subsequently assembled from them; on
+    # failure (a malformed query/parameters, or an entity_id/
+    # source_entity_id/target_entity_id with no corresponding
+    # registered Entity), REASONING_QUERY_FAILED fires alone instead,
+    # and neither of the other two fires - mirroring
+    # CONNECTOR_INVOKED/CONNECTOR_FAILED's (Package 017) "mutually
+    # exclusive outcomes for a single call" precedent, extended here
+    # to three events only because this package's own Events section
+    # names three, not two.
+    REASONING_QUERY_EXECUTED = "reasoning_query_executed"
+    REASONING_RESULT_CREATED = "reasoning_result_created"
+    REASONING_QUERY_FAILED = "reasoning_query_failed"

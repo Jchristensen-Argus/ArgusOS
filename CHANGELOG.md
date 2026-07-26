@@ -801,3 +801,38 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - No vector search.
 - `synchronize_all()`'s per-record relationship resolution depends on `IMemoryService.list()`'s (unordered) iteration order; a second pass resolves any references that failed on the first.
 - No concurrency.
+
+## Package 020 - Reasoning Engine
+
+### Added
+
+- Added `argus/reasoning/` package (Package 020 - Reasoning Engine):
+  - `query.py` - `ReasoningQuery`: an immutable request (`entity_type`, `relationship_type`, `entity_id`, `depth`, `filters`). Pure data, no validation of its own - validation lives in `ReasoningEngine`, matching the "pure leaf" precedent set by `Entity`/`Relationship`.
+  - `result.py` - `ReasoningResult`: an immutable, descriptive-only outcome (`matched_entities`, `matched_relationships`, `reasoning_steps`, `metadata`). No confidence scores, no AI-generated explanations - `reasoning_steps` is a factual, mechanical execution trace only.
+  - `interfaces.py` - `IReasoningEngine(IService)`: `query`, `neighbors`, `find_paths`, `related_entities`, `entity_summary`, `relationship_summary`, plus the inherited IService contract.
+  - `engine.py` - `ReasoningEngine`: a deterministic, read-only query layer over an injected `IKnowledgeGraph`. `query()` interprets a `ReasoningQuery` across four branches - traversal from a specific `entity_id` (breadth-first reachability, bounded by `depth`, optionally restricted by `relationship_type`), search by `entity_type` alone, search by `relationship_type` alone, and a combined "simple graph pattern" (relationships of a given type touching an entity of a given type) when both are set together. `neighbors()`/`related_entities()` return an entity's direct connections, the latter optionally restricted by relationship type. `entity_summary()`/`relationship_summary()` return count-based descriptive summaries. `find_paths()` deterministically enumerates every simple path between two entities up to an explicit `max_depth`, via bounded depth-first search - the first package permitted to perform genuine multi-hop graph traversal, since Package 018's "No graph algorithms yet" was an explicit deferral, not a permanent prohibition. Every public method also attaches the injected `IMemoryIntegration`'s own `synchronization_status()` snapshot to its result's metadata, read-only, satisfying the Objective's "consumes information from... Memory Integration" without correlating individual Entities back to memory keys (which would require reaching into `MemoryMapper`'s private id scheme).
+  - `exceptions.py` - `ReasoningError` (base, also used for IService lifecycle transition failures), `InvalidReasoningQueryError`, `ReasoningTargetNotFoundError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/020_REASONING_ENGINE.md`, including a note that no `design/specifications/REASONING_ENGINE.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-019).
+- Extended `argus/events/event_types.py`'s `EventType` with three new members: `REASONING_QUERY_EXECUTED`, `REASONING_RESULT_CREATED`, `REASONING_QUERY_FAILED` - exactly the three this package's work order named, no more. Every public method publishes `REASONING_QUERY_EXECUTED` then `REASONING_RESULT_CREATED` on success, or `REASONING_QUERY_FAILED` alone on failure - mutually exclusive outcomes for a single call.
+- Added `tests/test_reasoning_query.py` (7 new tests), `tests/test_reasoning_result.py` (7 new tests), `tests/test_reasoning_engine.py` (72 new tests covering entity/relationship/pattern queries, neighbor traversal, path discovery including parallel edges and self-loops, summaries, empty-graph behavior, invalid input, lifecycle behavior, and event publication for every public method's success and failure paths).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Reasoning Engine resolves from the Container, is registered but not started, and can query a live Knowledge Graph end-to-end (no disk-backed resource involved, unlike Memory Integration's own end-to-end bootstrap test).
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"reasoning_engine"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `ReasoningEngine` (depends on the Event Bus, the Knowledge Graph, and Memory Integration) immediately after Memory Integration and immediately before the Agent Runtime, registers it in the Container as `"reasoning_engine"`. Bootstrap order is now ... -> Knowledge Graph -> Memory Integration -> Reasoning Engine -> Agent Runtime -> Connector Manager -> Register Core Services -> Application. `_register_core_services` now registers twenty core services. `CORE_SERVICES_VERSION` remains `"0.1.9"` - unchanged by this package. ReasoningEngine's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/knowledge_graph/`, `argus/memory_integration/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - the Reasoning Engine consumes only their existing, unmodified public interfaces. Per this package's own explicit instruction, the Planner does not yet consume the Reasoning Engine.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `ReasoningEngine` DOES inherit `IService`, per explicit Founder instruction - but, like Package 018's Knowledge Graph and unlike Package 019's Memory Integration, applying the criterion independently to this package's own methods would NOT have suggested adoption: all six public methods are read-only, in-memory, and ungated. This is the third IService adopter in this codebase with zero gated methods (after IntentRouter and KnowledgeGraph), and the second case (after Knowledge Graph) where an explicit adoption instruction diverges from the criterion's own independent conclusion. Tenth adopter overall, seventh genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- No persistence - the Reasoning Engine holds no state of its own; every query re-reads the live Knowledge Graph.
+- No graph algorithms beyond bounded, deterministic BFS reachability (`query()`'s entity_id branch) and bounded, deterministic simple-path DFS enumeration (`find_paths()`) - no shortest-path ranking, no weighting, no heuristics.
+- No AI reasoning, no probabilistic inference, no LLM invocation - every result is descriptive and mechanically derived.
+- `find_paths()`'s exhaustive simple-path enumeration is combinatorially bounded by `max_depth` and the graph's own density; a very dense graph with a large `max_depth` could enumerate a large number of paths. No limit on result size exists in Version 1 beyond `max_depth` itself.
+- `ReasoningResult.metadata`'s `memory_synchronization_status` reflects Memory Integration's own bookkeeping only - it does not correlate individual matched Entities back to the specific memory keys that produced them (see `argus/reasoning/engine.py`'s own Architectural Decision).
+- No concurrency.
