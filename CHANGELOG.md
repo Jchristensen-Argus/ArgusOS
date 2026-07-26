@@ -907,3 +907,41 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - The Decision Engine does not yet consume the Cognitive Context, per this package's own explicit Version 1 scope limit.
 - `memory_references`/`knowledge_references`/`decision_references` are opaque identifier strings - `CognitiveContext` performs no lookup, dereferencing, or validation that a given identifier corresponds to an existing record.
 - No concurrency.
+
+## Package 023 - Planning Session
+
+### Added
+
+- Added `argus/planning/` package (Package 023 - Planning Session):
+  - `session.py` - `PlanningSession`: an immutable transport object (`session_id`, `cognitive_context`, `goals`, `constraints`, `metadata`). `cognitive_context` holds the actual, already-immutable `CognitiveContext` (Package 022) itself; `goals`/`constraints` hold the actual `PlanningGoal`/`PlanningConstraint` objects, not reference strings - a deliberate contrast with `CognitiveContext`'s own three "..._references" fields, resolved the same way: by the work order's own field naming. Pure data, no validation of its own - validation lives in `PlanningSessionBuilder`.
+  - `goal.py` - `PlanningGoal`: an immutable value object (`goal_id`, `name`, `description`, `priority`). "Priority is descriptive only. No scheduling logic." - never read, compared, or sorted by anything in this package; `PlanningSession.goals` always preserves exact call order.
+  - `constraint.py` - `PlanningConstraint`: an immutable value object (`constraint_id`, `name`, `description`, `metadata`). "No validation logic." - carries no evaluable logic of any kind.
+  - `metadata.py` - `PlanningMetadata`: an immutable value object (`created_at`, `version`, `correlation_id`, `extra`), directly reusing `ContextMetadata`'s (Package 022) own reconciliation of "arbitrary metadata" and "creation timestamp, version, correlation identifier" into a single field - the second consecutive package to use this exact shape.
+  - `builder.py` - `PlanningSessionBuilder`: a mutable, fluent builder implementing `IPlanningSessionBuilder` - `with_context`/`with_goal`/`with_constraint`/`with_metadata`/`build`. "Builder is mutable. PlanningSession is immutable. Each call to build() returns an independent immutable snapshot." `with_goal()`/`with_constraint()` accumulate across calls; `with_context()` and repeated `with_metadata()` calls on the same key overwrite (last call wins). Directly mirrors `ContextBuilder`'s (022) own shape and validation discipline.
+  - `interfaces.py` - `IPlanningSessionBuilder(ABC)` - explicitly NOT `IService`: "This is not an IService... No service registration. No lifecycle integration. No EventBus changes." Directly reuses `ICognitiveContextBuilder`'s (022) own resolution for the identical question.
+  - `exceptions.py` - `PlanningError` (base), `InvalidPlanningSessionError` - raised only by `PlanningSessionBuilder`'s `with_*` methods for malformed input.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/023_PLANNING_SESSION.md`, including a note that no `design/specifications/PLANNING_SESSION.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-022).
+- Added `tests/test_planning_session.py` (15 new tests), `tests/test_planning_builder.py` (20 new tests), `tests/test_planning_goal.py` (9 new tests), `tests/test_planning_constraint.py` (11 new tests), `tests/test_planning_metadata.py` (10 new tests) covering immutability, builder chaining, builder validation, metadata behavior, empty/populated sessions, multiple goals, multiple constraints, invalid construction, and equality semantics.
+
+### Not Changed
+
+- **`argus/bootstrap.py` was intentionally left unchanged** - Package 023 registers no new core service, per this package's own explicit "No service registration. No lifecycle integration. No EventBus changes" Constraint. `CORE_SERVICES_VERSION` remains `"0.2.2"`.
+- **`argus/events/event_types.py` was intentionally left unchanged** - no new `EventType` members. "No EventTypes."
+- **`tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` were intentionally left unchanged** - no `CORE_SERVICE_NAMES` sync was needed, since this package registers no core service.
+- `argus/context/`, `argus/decision/`, `argus/reasoning/`, `argus/knowledge_graph/`, `argus/memory_integration/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - `PlanningSession` consumes only `CognitiveContext`, an existing, unmodified type. Per this package's own explicit instruction, the Planner does not yet consume the Planning Session.
+
+### ADR Update
+
+- Not applicable - this package introduces no `IService` adopter. `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` was not modified.
+
+### Known Limitations
+
+- No lifecycle, no service registration - `PlanningSession`/`PlanningSessionBuilder` carry no `IService` contract of any kind.
+- No events - this package publishes nothing.
+- No persistence, no serialization - a `PlanningSession` exists only in memory for as long as a caller holds a reference to it.
+- No goal validation, no plan optimization, no workflow execution - "It performs no planning. It executes no workflows."
+- `PlanningGoal.priority` has no behavior - descriptive only.
+- `PlanningConstraint` carries no evaluable logic - purely descriptive data.
+- The Planner does not yet consume the Planning Session, per this package's own explicit Version 1 scope limit.
+- No concurrency.
