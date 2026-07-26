@@ -256,3 +256,25 @@ class EventType(Enum):
     CONNECTOR_DISABLED = "connector_disabled"
     CONNECTOR_INVOKED = "connector_invoked"
     CONNECTOR_FAILED = "connector_failed"
+
+    # Added by Package 018 - Knowledge Graph, per this module's own
+    # "single place new event types are added" scope note above.
+    # KnowledgeGraph publishes these on the existing Event Bus (see
+    # argus/knowledge_graph/graph.py). ENTITY_ADDED fires once per
+    # successful add_entity() call. ENTITY_REMOVED fires once per
+    # successful remove_entity() call - including when that call also
+    # cascades to remove Relationships referencing the removed Entity
+    # (see graph.py's own Cascading Removal note); cascaded
+    # Relationship removals do not each publish their own
+    # RELATIONSHIP_REMOVED, only the single ENTITY_REMOVED for the
+    # call that triggered them, mirroring
+    # ConnectorManager.unregister_connector()'s (Package 017) "one
+    # call, one event" precedent. RELATIONSHIP_ADDED fires once per
+    # successful add_relationship() call. RELATIONSHIP_REMOVED fires
+    # once per successful, direct remove_relationship() call only.
+    # None of the four fire for a failed (validation error, duplicate,
+    # not-found, or invalid-reference) call.
+    ENTITY_ADDED = "entity_added"
+    ENTITY_REMOVED = "entity_removed"
+    RELATIONSHIP_ADDED = "relationship_added"
+    RELATIONSHIP_REMOVED = "relationship_removed"

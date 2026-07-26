@@ -1,47 +1,48 @@
-# ArgusOS Implementation Report — Package 017: Connector Framework
+# ArgusOS Implementation Report — Package 018: Knowledge Graph
 
 ## 1. Package Overview
 
-Package 017 adds `argus/connectors/`, the only layer in ArgusOS responsible for communicating with external systems. `ConnectorManager` registers, enables/disables, looks up, and invokes `Connector`s - immutable metadata records paired one-to-one with a live `IConnector` implementation held internally by the manager. `invoke()` is gated on the manager's own `IService` lifecycle state being `RUNNING`; `register_connector()`/`unregister_connector()`/`get_connector()`/`list_connectors()`/`enable_connector()`/`disable_connector()` remain ungated registry-style operations - continuing, not breaking, the `IService`-adoption pattern `AgentRuntime` established in Package 016. `invoke()` always calls the implementation's `connect()` (required to be idempotent) immediately before calling its `invoke()`, and never calls `disconnect()` automatically. Version 1 ships exactly one concrete `IConnector` implementation, `MockConnector` - fully in-memory, no network, no I/O, no authentication - per this package's explicit "No real integrations yet. Use mock connectors only" constraint. `ConnectorManager` is registered as ArgusOS's 17th core service, constructed immediately after the Agent Runtime; bootstrap.py also registers one built-in mock connector, "Mock External System." All 831 pre-existing canonical tests still pass unchanged; 894 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (982 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
+Package 018 adds `argus/knowledge_graph/`, a structured semantic layer for persistent knowledge - an in-memory graph of `Entity` nodes connected by typed, directed `Relationship` edges. `KnowledgeGraph` exposes add/remove/get/list for both, plus `neighbors()` (single-hop lookup, either direction) and `find_by_type()` (exact-match Entity filter) as its only two query operations - "No graph algorithms yet... Only foundational graph operations." `remove_entity()` cascades to remove every Relationship referencing the removed Entity, guaranteeing referential integrity by construction. `add_relationship()` rejects references to unknown Entities. Per this package's explicit "Extend IService" instruction, `IKnowledgeGraph` DOES inherit `IService` - but none of its own methods are gated on the `RUNNING` state, making it the second such adopter in this codebase (after `IntentRouter`, Package 009) and the first case where an explicit adoption instruction diverges from what ADR-0002's criterion would independently conclude. `KnowledgeGraph` is registered as ArgusOS's 18th core service, inserted between the Planner and the Agent Runtime - the first construction-order insertion in this project's history to land in the middle of the existing sequence rather than being appended at the end. All 894 pre-existing canonical tests still pass unchanged; 967 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (1,055 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
 
 ## 2. Repository Verification Note
 
-Before writing any code, the uploaded repository ("ArgusOS (16).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, run smoke validation") - this work order did not specify the fixed, numbered checklist Packages 013-015's did.
+Before writing any code, the uploaded repository ("ArgusOS (17).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, run smoke validation").
 
-No anomaly was found this time - a return to the standard pattern after Package 016's own uncommitted-version-bump variation. HEAD (`fc6225a`, "Synchronize repository version with v0.1.6 release") is a clean, single-commit descendant of tag `v0.1.6` (which points to `2f40211`, "Implement Package 016 Agent Runtime"), confirmed via `git merge-base --is-ancestor v0.1.6 HEAD`. `git diff v0.1.6..HEAD --stat` shows exactly 1 file changed (`argus/bootstrap.py`, 1 insertion/1 deletion) - a minimal, standard version-only sync commit, now fully committed (the working tree that produced Package 016's own uncommitted anomaly has since been committed by the Founder, as evidenced by the now-present `ca30cfb`, "Synchronize repository version with v0.1.5 release," ancestor commit). `git status --short` showed a completely clean working tree. Every substantive check passed cleanly: Package 016 (`argus/runtime/`) present with all 5 expected files; `python -m pytest` passing (919 passed, 38 subtests); `python -m unittest discover -s tests` passing (831); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.1.6"` matching tag `v0.1.6`.
+No anomaly was found - the fourth consecutive clean pre-flight (016-018, plus 014-015 earlier). HEAD (`0b1ae78`, "Synchronize repository version with v0.1.7 release") is a clean, single-commit descendant of tag `v0.1.7` (which points to `7d5a5fa`, "Implement Package 017 Connector Framework"), confirmed via `git merge-base --is-ancestor v0.1.7 HEAD`. `git diff v0.1.7..HEAD --stat` shows exactly 1 file changed (`argus/bootstrap.py`, 1 insertion/1 deletion) - a minimal, standard version-only sync. `git status --short` showed a completely clean working tree. Every substantive check passed cleanly: Package 017 (`argus/connectors/`) present; `python -m pytest` passing (982 passed, 38 subtests); `python -m unittest discover -s tests` passing (894); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.1.7"` matching tag `v0.1.7`.
 
 Per the Founder's explicit release rules, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, push, or git-history modification of any kind was performed, `CORE_SERVICES_VERSION` was not changed by this package, and this package is not being reported as complete — final validation, integration, release, tagging, and git operations are the Founder's responsibility, to be performed against the live repository after independent regression testing.
 
 ## 3. Architectural Rationale
 
-No `design/specifications/CONNECTOR_FRAMEWORK.md` exists — the same situation as Packages 002, 009-016. Every structural decision traces to the Founder's explicit work order. The full rationale for each decision below is also recorded in `factory/packages/017_CONNECTOR_FRAMEWORK.md`'s "Architectural Decisions" section, in the source code's own module docstrings, and is only summarized here.
+No `design/specifications/KNOWLEDGE_GRAPH.md` exists — the same situation as Packages 002, 009-017. Every structural decision traces to the Founder's explicit work order. The full rationale for each decision below is also recorded in `factory/packages/018_KNOWLEDGE_GRAPH.md`'s "Architectural Decisions" section, in the source code's own module docstrings, and is only summarized here.
 
-**Decision 1 — `Connector` and `MockConnector` are kept in different files to avoid a circular import.** This package's explicit five-file structure has no dedicated file for a concrete connector implementation, yet Version 1 must ship one. Placing `MockConnector` in `connector.py` would force it to import `IConnector` from `interfaces.py`, which already imports `Connector` from `connector.py` for typing — a cycle. `MockConnector` was placed in `manager.py` instead, keeping `connector.py` a pure, dependency-free leaf, matching the precedent set by `Capability`/`Plugin`/`Plan`/`Execution`.
+**Decision 1 — `remove_entity()` cascades to remove referencing Relationships.** Neither forbidding removal (a foreign-key-style constraint) nor cascading is stated explicitly; cascading was chosen to guarantee referential integrity by construction (a Relationship can never outlive either Entity it connects), costs the caller nothing extra, and matches "lightweight infrastructure" better than a removal constraint. Cascaded removals publish only the single `ENTITY_REMOVED`, not a `RELATIONSHIP_REMOVED` per cascaded edge.
 
-**Decision 2 — `invoke()` always calls `connect()` first; it never calls `disconnect()` afterward.** `ConnectorManager`'s own method list names only `invoke()`, with no manager-level `connect()`/`disconnect()` — meaning `invoke()` is the only way a caller using the manager's public API can ever cause a connector to connect. `IConnector.connect()` is required by contract to be idempotent, making this safe regardless of prior state. `disconnect()` is never called automatically, on a "connect once, invoke many times" model; no automatic idle-teardown policy exists in Version 1.
+**Decision 2 — `IKnowledgeGraph` inherits `IService`, but no method is gated.** This package's work order explicitly instructs "Extend `IService`" — unlike every prior IService question in this codebase, adoption itself was not this Engineer's judgment call. Applying ADR-0002's criterion to the actual methods independently would not have suggested adoption (no external call, no dispatch, no phase distinction). The full IService lifecycle boilerplate was implemented with zero gated methods, mirroring `IntentRouter`'s (009) identical shape — the narrower question of *which* methods to gate remained this Engineer's call, and the answer was "none."
 
-**Decision 3 — `IConnectorManager.health_check()` is not exposed at the manager level.** `ConnectorManager`'s explicit method list (register/unregister/get/list/enable/disable/invoke) does not include `health_check()`, even though `IConnector` itself has one. Rather than inventing a manager-level wrapper the work order does not ask for, `health_check()` is tested directly against `MockConnector` instances in `tests/test_connector.py`.
+**Decision 3 — `id`, not `entity_id`/`relationship_id`, for each model's own identity.** Follows the established `id`-for-self-identity convention already set by `Capability`, `Plugin`, `Plan`, `PlanStep`, `Execution`, and `Connector`.
 
-**Decision 4 — `register_connector()` does not `isinstance`-check its `implementation` argument.** `connector: Connector` is validated because it is a concrete dataclass this package defines; `implementation: IConnector` is an injected, foreign, behavioral dependency, and no constructor-injected interface anywhere in this codebase is ever `isinstance`-checked at the point of injection — `register_connector()` follows that same convention, trusting `implementation` by type hint only.
+**Decision 4 — `source_entity_id`/`target_entity_id`, not the work order's literal `source_entity`/`target_entity`.** Follows the established `<noun>_id`-for-references convention (`Capability.workflow_id`, `Execution.plan_id`), keeping unambiguous that these fields hold id strings, never live `Entity` objects.
 
-**Decision 5 — lookup is by `id`, not literally "by name."** The work order's Responsibilities section says "resolve connectors by name," but every prior registry in this codebase (`Capability`, `Plugin`, `Plan`, `Execution`) is looked up by a generated `id`, not by a non-unique `name`. `get_connector(connector_id)` follows that same established convention.
+**Decision 5 — Neither `argus/planner/` nor `argus/runtime/` is modified.** "The Planner may consult the Knowledge Graph. The Runtime must not modify it" describes a capability the target architecture now permits for a future package, not a requirement to wire it in this one — this package's own New Package/Responsibilities/Testing sections make no mention of touching either module.
 
-**Decision 6 — `Connector.id`, not `connector_id`, for the model's own identity.** Follows the established `id`-for-self-identity / `<noun>_id`-for-references convention already set by `Capability`, `Plugin`, `Plan`, `PlanStep`, and `Execution`.
+**Decision 6 — Lookup is `id`-based; `find_by_type()` is the only supported query beyond direct lookup and `neighbors()`.** Follows established registry convention (`Capability`, `Plugin`, `Plan`, `Execution`, `Connector` are all looked up by `id`); no relationship-type query method was added, since none is named in the work order's closed method list.
 
-**Decision 7 — `Connector.capabilities` is a plain tuple of strings, unrelated to `argus.capability.Capability`.** "Capabilities" here means operation names a connector exposes to `invoke()` — a connector-local, descriptive concept with no relationship to the Dispatcher-facing `Capability` class, keeping `argus.connectors` free of any dependency on `argus.capability`.
+**Decision 7 — Multiple Relationships between the same pair of Entities are permitted.** `add_relationship()` only rejects a duplicate `id`, matching `CapabilityRegistry`/`PluginManager`/`ConnectorManager`'s identical "duplicate id only" precedent.
 
-## 4. IService Adoption — Continuing the Pattern Package 016 Set
+## 4. IService Adoption — A New Category of Finding
 
-`IConnectorManager` DOES inherit `IService` — `invoke()` is genuinely gated on the manager's own `RUNNING` state, architecturally identical to (and arguably a stronger case than) `IntentDispatcher.dispatch()` (012) and `AgentRuntime.start_execution()` (016), since `invoke()` is the literal boundary between ArgusOS and every external system. `register_connector()`/`unregister_connector()`/`get_connector()`/`list_connectors()`/`enable_connector()`/`disable_connector()` remain ungated, matching `AgentRuntime`'s own pause/cancel/get/list precedent. This is the seventh `IService` adopter overall and the sixth genuinely gated one — appended to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` as further evidence the criterion discriminates correctly. Its Status remains `Proposed`, per standing instruction.
+`IKnowledgeGraph` DOES inherit `IService`, per explicit Founder instruction rather than this Engineer's own application of ADR-0002's criterion — the first such case in this codebase. Applying the criterion independently to the actual methods would not have suggested adoption: none of `add_entity`/`remove_entity`/`get_entity`/`list_entities`/`add_relationship`/`remove_relationship`/`list_relationships`/`neighbors`/`find_by_type` involve an external call, dispatch, or genuine phase distinction. No method is gated on `RUNNING` — the second zero-gated-method adopter in this codebase after `IntentRouter` (009). This is the eighth `IService` adopter overall and the ninth core service without a genuinely gated method (Capability Registry, Plugin Manager, and Planner don't implement IService at all; IntentRouter and now KnowledgeGraph implement it with nothing gated) — appended to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` as a new category of finding, distinct from every prior "judgment call" entry: what should happen when an explicit instruction and the criterion's own logic diverge. Its Status remains `Proposed`, per standing instruction.
 
 ## 5. Directory Tree (files touched)
 
 ```
 argus/
-    connectors/
+    knowledge_graph/
         __init__.py                        (new)
-        connector.py                       (new)
-        manager.py                         (new)
+        entity.py                          (new)
+        relationship.py                    (new)
+        graph.py                           (new)
         interfaces.py                      (new)
         exceptions.py                      (new)
     bootstrap.py                           (modified)
@@ -52,43 +53,44 @@ design/
         0002_ISERVICE_ADOPTION_CRITERION.md   (modified — appended finding)
 factory/
     packages/
-        017_CONNECTOR_FRAMEWORK.md          (new)
+        018_KNOWLEDGE_GRAPH.md              (new)
     ROADMAP.md                              (modified)
 tests/
     test_bootstrap.py                       (modified)
-    test_connector.py                       (new)
-    test_connector_manager.py               (new)
+    test_entity.py                          (new)
+    test_relationship.py                    (new)
+    test_knowledge_graph.py                 (new)
 argus/tests/test_bootstrap.py               (modified — CORE_SERVICE_NAMES tuple only, per explicit instruction)
 CHANGELOG.md                                (modified)
 DEVLOG.md                                   (modified)
 IMPLEMENTATION_REPORT.md                    (replaced — this file)
 ```
 
-No file outside this list was created, deleted, moved, or modified. `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, `argus/factory/`, and every legacy pre-Factory file were left completely untouched.
+No file outside this list was created, deleted, moved, or modified. `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, `argus/connectors/`, `argus/CHANGELOG.md`, `argus/DEVLOG.md`, `argus/IMPLEMENTATION_REPORT.md`, `argus/factory/`, and every legacy pre-Factory file were left completely untouched.
 
 ## 6. Integration Notes
 
-- `ConnectorManager(event_bus)` — constructed in `bootstrap.py` immediately after the Agent Runtime, depending only on the Event Bus.
-- This is now the 17th core service constructed in the bootstrap sequence; bootstrap.py also registers one built-in `Connector` ("Mock External System") backed by a `MockConnector`.
-- Registered in the Container (`"connector_manager"`), in the Service Registry as a `ServiceDescriptor` (version `"0.1.6"`, the repository's currently released version — see Section 2), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — matching the treatment of all sixteen prior core services. `ConnectorManager`'s own `initialize()`/`start()` are NOT called by bootstrap, for the same divergence-avoidance reasoning already applied to every other `IService` adopter.
-- `argus/events/event_types.py` extended with five new members: `CONNECTOR_REGISTERED`, `CONNECTOR_ENABLED`, `CONNECTOR_DISABLED`, `CONNECTOR_INVOKED`, `CONNECTOR_FAILED`.
-- Naming (`"connector_manager"`) verified against the repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` convention before implementation.
-- The repository's pre-existing, known stray duplicate `argus/tests/test_bootstrap.py` had its `CORE_SERVICE_NAMES` tuple synchronized with `"connector_manager"` added, per the standing Repository Rule introduced in Package 011 — and only that tuple.
-- Source-inspection confirms `argus/connectors/manager.py` contains no `import argus.runtime`, `argus.planner`, `argus.dispatcher`, `argus.plugins`, `argus.capability`, or `argus.workflow` statement anywhere — its only cross-package import beyond `argus.connectors` itself and the standard library is `argus.events` and `argus.lifecycle.lifecycle.LifecycleState`.
+- `KnowledgeGraph(event_bus)` — constructed in `bootstrap.py` immediately after the Planner and immediately before the Agent Runtime, depending only on the Event Bus.
+- This is now the 18th core service constructed in the bootstrap sequence — the first insertion in this project's history to land in the middle of the existing construction order (previous Agent Runtime/Connector Manager code moved down, unchanged in every other respect).
+- Registered in the Container (`"knowledge_graph"`), in the Service Registry as a `ServiceDescriptor` (version `"0.1.7"`, the repository's currently released version — see Section 2), and in the Lifecycle Manager as `LifecycleState.REGISTERED` — matching the treatment of all seventeen prior core services. `KnowledgeGraph`'s own `initialize()`/`start()` are NOT called by bootstrap, for the same divergence-avoidance reasoning already applied to every other `IService` adopter.
+- `argus/events/event_types.py` extended with four new members: `ENTITY_ADDED`, `ENTITY_REMOVED`, `RELATIONSHIP_ADDED`, `RELATIONSHIP_REMOVED`.
+- Naming (`"knowledge_graph"`) verified against the repository's own `tests/test_bootstrap.py::CORE_SERVICE_NAMES` convention before implementation.
+- The repository's pre-existing, known stray duplicate `argus/tests/test_bootstrap.py` had its `CORE_SERVICE_NAMES` tuple synchronized with `"knowledge_graph"` added, per the standing Repository Rule introduced in Package 011 — and only that tuple.
+- Source-inspection confirms `argus/knowledge_graph/graph.py` contains no `import argus.runtime`, `argus.planner`, `argus.dispatcher`, `argus.plugins`, `argus.capability`, `argus.workflow`, or `argus.connectors` statement anywhere — its only cross-package import beyond `argus.knowledge_graph` itself is `argus.events` and `argus.lifecycle.lifecycle.LifecycleState`.
 
 ## 7. Test Results
 
 Canonical suite (`tests/`):
 ```
 python -m unittest discover -s tests
-Ran 894 tests in 0.079s
+Ran 967 tests in 0.083s
 OK
 ```
 
 Per this package's explicit testing instruction:
 ```
 python -m pytest
-982 passed, 38 subtests passed in 0.93s
+1055 passed, 38 subtests passed in 0.99s
 ```
 
 The synchronized duplicate `argus/tests/` also verified passing standalone (unaffected by the one-line sync):
@@ -113,79 +115,81 @@ Measured with `coverage.py`, `python -m coverage run -m pytest`:
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/bootstrap.py` | 72 | 0 | 100% |
-| `argus/events/event_types.py` | 68 | 0 | 100% |
-| `argus/connectors/__init__.py` | 5 | 0 | 100% |
-| `argus/connectors/connector.py` | 16 | 0 | 100% |
-| `argus/connectors/exceptions.py` | 7 | 0 | 100% |
-| `argus/connectors/interfaces.py` | 28 | 0 | 100% |
-| `argus/connectors/manager.py` | 109 | 0 | 100% |
+| `argus/bootstrap.py` | 75 | 0 | 100% |
+| `argus/events/event_types.py` | 72 | 0 | 100% |
+| `argus/knowledge_graph/__init__.py` | 6 | 0 | 100% |
+| `argus/knowledge_graph/entity.py` | 12 | 0 | 100% |
+| `argus/knowledge_graph/relationship.py` | 13 | 0 | 100% |
+| `argus/knowledge_graph/graph.py` | 107 | 0 | 100% |
+| `argus/knowledge_graph/interfaces.py` | 24 | 0 | 100% |
+| `argus/knowledge_graph/exceptions.py` | 7 | 0 | 100% |
 
-Package 017 total (all `argus/connectors/*` plus touched `argus/bootstrap.py`/`argus/events/event_types.py`): 305 statements, 100% covered — no accepted gaps. Full `argus/*` coverage: 99% (unchanged from Package 016; remaining gaps are pre-existing and out of scope).
+Package 018 total (all `argus/knowledge_graph/*` plus touched `argus/bootstrap.py`/`argus/events/event_types.py`): 316 statements, 100% covered — no accepted gaps. Full `argus/*` coverage: 99% (unchanged from Package 017; remaining gaps are pre-existing and out of scope).
 
 ## 9. Engineering Decisions / Deviations from the Work Order
 
-- **`MockConnector` lives in `manager.py`, not `connector.py`**, to avoid a circular import while staying within the package's explicit five-file structure. See Section 3, Decision 1.
-- **`invoke()` auto-connects but never auto-disconnects** — the only way a caller using solely `ConnectorManager`'s public API can reach `connect()`, given the manager's own method list has no separate connect/disconnect entry points. See Section 3, Decision 2.
-- **No manager-level `health_check()` wrapper was added** — `ConnectorManager`'s method list is treated as closed, matching prior packages' identical treatment of closed event/method lists. See Section 3, Decision 3.
-- **`implementation` is not `isinstance`-checked in `register_connector()`** — consistent with how every other injected interface dependency is trusted in this codebase. See Section 3, Decision 4.
-- **Lookup is `id`-based, not literally "by name"** — following established registry convention over the work order's Responsibilities-section wording. See Section 3, Decision 5.
-- **`Connector.id` (not `connector_id`) is the model's own field name** — following established repository convention over the work order's literal suggestion. See Section 3, Decision 6.
-- **`Connector.capabilities` is a plain tuple of strings**, deliberately unrelated to `argus.capability.Capability`, keeping this package free of any dependency on the Capability Registry. See Section 3, Decision 7.
-- **`IConnectorManager` DOES inherit `IService`** — a deliberate, ADR-0002-driven choice, continuing the pattern Package 016 set. See Section 4.
-- **`CORE_SERVICES_VERSION` remains `"0.1.6"`, unchanged by this package.** Per the Founder's standing policy and this package's own explicit Constraints.
+- **`remove_entity()` cascades to remove referencing Relationships** — not stated explicitly; chosen to guarantee referential integrity by construction. See Section 3, Decision 1.
+- **`IKnowledgeGraph` DOES inherit `IService`, per explicit instruction, but no method is gated** — a new category of finding for ADR-0002, distinct from every prior judgment-call entry. See Section 4.
+- **`Entity.id`/`Relationship.id` (not `entity_id`/`relationship_id`) are the models' own field names** — following established repository convention over the work order's literal suggestion. See Section 3, Decision 3.
+- **`source_entity_id`/`target_entity_id` (not `source_entity`/`target_entity`)** — following established `_id`-suffix reference convention. See Section 3, Decision 4.
+- **Neither `argus/planner/` nor `argus/runtime/` was modified** — the diagram's "Planner may consult" arrow describes a future capability, not a Version 1 requirement of this package. See Section 3, Decision 5.
+- **No relationship-type query method was added** — the work order's Graph Service method list is treated as closed, matching prior packages' identical treatment of closed lists. See Section 3, Decision 6.
+- **Duplicate-content Relationships (same source/target/type) are permitted** — only duplicate `id` is rejected. See Section 3, Decision 7.
+- **`CORE_SERVICES_VERSION` remains `"0.1.7"`, unchanged by this package.** Per the Founder's standing policy and this package's own explicit Constraints.
 - **`argus/tests/test_bootstrap.py` (duplicate tree) synchronized, tuple-only**, per the standing Repository Rule introduced in Package 011.
+- **Knowledge Graph construction was inserted mid-sequence in `bootstrap.py`**, between the Planner and the Agent Runtime, per the work order's own explicit construction order — the first mid-sequence insertion in this project's history (every prior new-core-service insertion was a simple append).
 
 ## 10. Known Limitations
 
-- **No real integrations** — `MockConnector` is Version 1's only `IConnector` implementation; no network I/O, authentication, or persistence of any kind, per this package's explicit Constraints.
-- `invoke()` does not automatically disconnect — a connector stays "connected" for the process lifetime once first invoked, unless something explicitly disconnects it directly (not exposed through `ConnectorManager`'s own API in Version 1). See Section 3, Decision 2.
-- `health_check()` is not reachable through `ConnectorManager` — only directly against a raw `IConnector` implementation. See Section 3, Decision 3.
-- `Connector.capabilities` is descriptive only — `invoke()` does not check that the requested operation is a member of it.
-- No persistence — Connectors are held only in memory.
-- No concurrency, no retries, no rollback for `invoke()` — explicit Version 1 constraints.
+- No persistence — Entities and Relationships are held only in memory.
+- No graph traversal algorithms — `neighbors()` is a single-hop lookup only; no shortest path, no multi-hop queries.
+- No inference, no AI reasoning — the graph returns exactly what was registered.
+- No vector search — `find_by_type()` is an exact-match filter only.
+- Not yet consulted by the Planner or any other component — pure infrastructure in this package; see Section 3, Decision 5.
+- `find_by_type()` has no relationship-type analogue — only Entities can be queried by type.
+- No concurrency — all operations are synchronous, single-threaded, single-process.
 - The repository's stray `argus/` duplicate tree (beyond the one explicitly-required `test_bootstrap.py` sync) and legacy pre-Factory files remain unresolved, out of scope per the Founder's explicit repository rules.
 
 ## 11. Repository-Derived Package Metrics (measured, not estimated)
 
-Measured via `git diff --stat` against the working tree's unmodified base commit `fc6225a` (no commit was made — see Section 2):
+Measured via `git diff --stat` against the working tree's unmodified base commit `0b1ae78` (no commit was made — see Section 2):
 
-- Files Created: 8 (5 `argus/connectors/*.py`, `factory/packages/017_CONNECTOR_FRAMEWORK.md`, 2 new test files)
+- Files Created: 10 (6 `argus/knowledge_graph/*.py`, `factory/packages/018_KNOWLEDGE_GRAPH.md`, 3 new test files)
 - Files Modified: 9 (`argus/bootstrap.py`, `argus/events/event_types.py`, `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`, `factory/ROADMAP.md`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md`)
-- Lines Added: 1,997 / Lines Removed: 96 (measured via `git diff --stat` across all 17 touched files, including this report's own replacement)
-- Unit Tests: 894 passing in canonical `tests/` (net +63 vs. Package 016's 831: +16 `test_connector.py`, +44 `test_connector_manager.py`, +3 `test_bootstrap.py` [26->29])
-- Coverage: 100% (Package 017 modules), 99% (full `argus/*`)
-- Public Classes: 2 (`Connector`, `ConnectorManager`) plus 1 built-in implementation (`MockConnector`)
-- Public Interfaces: 2 (`IConnector`, `IConnectorManager`)
+- Lines Added: 2,074 / Lines Removed: 121 (measured via `git diff --stat` across all 19 touched files, including this report's own replacement)
+- Unit Tests: 967 passing in canonical `tests/` (net +73 vs. Package 017's 894: +6 `test_entity.py`, +7 `test_relationship.py`, +57 `test_knowledge_graph.py`, +3 `test_bootstrap.py` [29->32])
+- Coverage: 100% (Package 018 modules), 99% (full `argus/*`)
+- Public Classes: 3 (`Entity`, `Relationship`, `KnowledgeGraph`)
+- Public Interfaces: 1 (`IKnowledgeGraph`)
 - New Dependencies: 0
 - External Libraries: 0 (standard library only)
 - Architecture Deviations: 0 (see Section 9 for documented, non-architectural deviations)
 
 ## 12. Pre-Completion Checklist (per the Founder's explicit checklist)
 
-- ✓ **Bootstrap registration** — `ConnectorManager(...)` constructed in `bootstrap.py`, registered in the Container as `"connector_manager"`. Confirmed via `test_bootstrap_registers_connector_manager_in_container`.
-- ✓ **Service registration** — recorded as a `ServiceDescriptor` (version `"0.1.6"`) alongside all sixteen prior core services.
-- ✓ **Lifecycle integration** — registered in the Lifecycle Manager as `LifecycleState.REGISTERED`, not started. Confirmed via `test_bootstrap_connector_manager_is_not_started`.
-- ✓ **Built-in connector integration** — confirmed via `test_bootstrap_registers_one_built_in_mock_connector`, invoking the built-in "Mock External System" connector end-to-end once the manager is explicitly started.
-- ✓ **No execution/dispatch/plugin/business-logic responsibilities taken on** — confirmed via source inspection: `argus/connectors/manager.py` contains no import of `argus.runtime`, `argus.planner`, `argus.dispatcher`, `argus.plugins`, `argus.capability`, or `argus.workflow` anywhere.
-- ✓ **Event Bus integration** — all five new connector events verified published at the correct points via `tests/test_connector_manager.py`.
-- ✓ **Naming consistency** — `"connector_manager"` verified against the repository's own `CORE_SERVICE_NAMES` convention before implementation.
-- ✓ **Regression suite passes** — `python -m unittest discover -s tests` reports `Ran 894 tests ... OK`; `python -m pytest` reports `982 passed, 38 subtests passed`.
+- ✓ **Bootstrap registration** — `KnowledgeGraph(...)` constructed in `bootstrap.py`, registered in the Container as `"knowledge_graph"`. Confirmed via `test_bootstrap_registers_knowledge_graph_in_container`.
+- ✓ **Service registration** — recorded as a `ServiceDescriptor` (version `"0.1.7"`) alongside all seventeen prior core services.
+- ✓ **Lifecycle integration** — registered in the Lifecycle Manager as `LifecycleState.REGISTERED`, not started. Confirmed via `test_bootstrap_knowledge_graph_is_not_started`.
+- ✓ **Entity/Relationship integration** — confirmed via `test_bootstrap_knowledge_graph_supports_entities_and_relationships`, registering real Entities/Relationships and querying `neighbors()` end-to-end.
+- ✓ **No Plan/execution/plugin/connector/business-logic responsibilities taken on** — confirmed via source inspection: `argus/knowledge_graph/graph.py` contains no import of `argus.runtime`, `argus.planner`, `argus.dispatcher`, `argus.plugins`, `argus.capability`, `argus.workflow`, or `argus.connectors` anywhere.
+- ✓ **Event Bus integration** — all four new entity/relationship events verified published at the correct points via `tests/test_knowledge_graph.py`.
+- ✓ **Naming consistency** — `"knowledge_graph"` verified against the repository's own `CORE_SERVICE_NAMES` convention before implementation.
+- ✓ **Regression suite passes** — `python -m unittest discover -s tests` reports `Ran 967 tests ... OK`; `python -m pytest` reports `1055 passed, 38 subtests passed`.
 - ✓ **`python main.py` starts cleanly** — exit code 0.
 - ✓ **`pyflakes` clean** — no warnings on any new/modified module.
 - ✓ **No unintended repository modifications** — confirmed via `git status`/`git diff --stat`; only the files listed in Section 5 were touched.
-- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.1.6"`.
-- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `fc6225a`).
-- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.1.1`-`v0.1.6`).
+- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.1.7"`.
+- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `0b1ae78`).
+- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.1.1`-`v0.1.7`).
 - ✓ **Repository ready for architectural review** — all regression, smoke, and pyflakes checks pass locally; final integration, version bump, commit, and tag remain the Founder's responsibility.
 
 ## 13. Concise Implementation Summary
 
-Package 017 adds `argus/connectors/`: `Connector` (an immutable metadata record), `IConnector`/`IConnectorManager(IService)`, and `ConnectorManager`, the sole component permitted to communicate with external systems - Version 1 exclusively via `MockConnector`, a fully in-memory implementation with no network, I/O, or authentication of any kind. `invoke()` is gated on the manager's own `RUNNING` state - the seventh `IService` adopter and sixth genuinely gated one, continuing rather than breaking Package 016's pattern. `invoke()` auto-connects (idempotently) but never auto-disconnects. `register_connector()`/`unregister_connector()`/`get_connector()`/`list_connectors()`/`enable_connector()`/`disable_connector()` remain ungated. `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, and `argus/plugins/` are all untouched - the Connector Framework's only dependency is the Event Bus. 894 tests pass in `tests/` (`python -m pytest` also passes: 982 passed, 38 subtests), 100% coverage across all Package 017 modules. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
+Package 018 adds `argus/knowledge_graph/`: `Entity`/`Relationship` (immutable value objects), `IKnowledgeGraph(IService)`, and `KnowledgeGraph`, an in-memory registry of Entities connected by directed Relationships. `remove_entity()` cascades to remove referencing Relationships, guaranteeing referential integrity by construction; `add_relationship()` rejects unknown endpoint references; `neighbors()`/`find_by_type()` are the only two supported queries. Per explicit instruction, `IKnowledgeGraph` inherits `IService` but gates no method — the second zero-gated-method adopter after `IntentRouter` (009), and the first case where an explicit adoption instruction diverges from what ADR-0002's criterion would independently conclude. `KnowledgeGraph` is inserted between the Planner and the Agent Runtime in bootstrap's construction order — the first mid-sequence insertion in this project's history. `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, and `argus/connectors/` are all untouched. 967 tests pass in `tests/` (`python -m pytest` also passes: 1,055 passed, 38 subtests), 100% coverage across all Package 018 modules. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
 
 ## 14. Architectural Observations
 
-- This package's construction order (Capability Registry -> Intent Dispatcher -> Planner -> Agent Runtime -> Connector Manager) is the first one in this project's history that is purely positional rather than dependency-driven — `ConnectorManager` depends only on the Event Bus and could have been constructed as early as Package 004 with no functional difference. Every prior "diagram position versus construction order" case (013, 015, 016) involved a package with a genuine functional dependency justifying its specific placement; this is the first where the work order's construction order has no dependency-based justification at all, worth naming explicitly for whoever next revisits bootstrap's sequencing.
-- `ConnectorManager` is the second consecutive `IService` adopter after `AgentRuntime` (016), giving ADR-0002 its first back-to-back-adoption data point rather than a single "the streak breaks" instance — useful evidence that adoption isn't a one-off exception but a real, repeatable outcome whenever a package's own core method is genuinely effectful.
-- The Connector Framework currently has no consumer anywhere in ArgusOS — nothing in `AgentRuntime`, `IntentDispatcher`, or any Workflow calls `ConnectorManager.invoke()`. This mirrors the same "infrastructure exists, integration is a future package's job" pattern already seen for `PluginManager` (014) and, to a lesser extent, `Planner`/`AgentRuntime`'s own synthetic-Intent limitation (015/016) — worth flagging explicitly so a future package's scope is not assumed to already include wiring the Connector Framework into the execution path.
-- The "currently-unowned architectural gap" flagged in Packages 011 through 016's own reports — nothing yet takes a raw user message all the way through classification, planning, execution, and external communication automatically — remains open after this package, now with one more seam built (external connectivity) but still not wired into the chain that would make it reachable end-to-end.
+- This package is the first in this project's history where a new core service's own explicit construction order requires *moving* existing code (Agent Runtime's construction block) rather than simply appending after it — worth flagging for whoever next adds a core service, since the "diagram position versus construction order" principle now has a third variant: purely positional insertion at the end (Connector Manager, 017), purely positional insertion in the middle (Knowledge Graph, 018), and genuinely dependency-driven placement (Capability Registry/Intent Dispatcher, 013; Planner/Intent Dispatcher, 015; Agent Runtime/Planner, 016).
+- This package's IService finding is the first of a new kind for ADR-0002: every prior entry recorded this Engineer's own application of the criterion to an open question; this one records what happens when the Founder's explicit instruction and the criterion's own independent conclusion diverge. Flagged explicitly rather than silently resolved, since ADR-0002 itself may need a future revision to address "directed" versus "derived" adoption as a formal distinction.
+- The Knowledge Graph currently has no consumer anywhere in ArgusOS — nothing in Planner, AgentRuntime, or any Workflow calls into it. This mirrors the same "infrastructure exists, integration is a future package's job" pattern already seen for `PluginManager` (014) and the Connector Framework (017) — worth flagging explicitly so a future package's scope is not assumed to already include wiring the Knowledge Graph into the Planner's own reasoning.
+- The "currently-unowned architectural gap" flagged in Packages 011 through 017's own reports — nothing yet takes a raw user message all the way through classification, planning, execution, and external communication automatically — remains open after this package, now with a new semantic-knowledge layer available but not yet consulted by anything in the actual pipeline.

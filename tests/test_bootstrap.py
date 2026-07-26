@@ -6,6 +6,7 @@ from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.capability import ICapabilityRegistry, CapabilityRegistry
 from argus.connectors import ConnectorManager, IConnectorManager
+from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -36,6 +37,7 @@ CORE_SERVICE_NAMES = (
     "intent_dispatcher",
     "plugin_manager",
     "planner",
+    "knowledge_graph",
     "agent_runtime",
     "connector_manager",
 )
@@ -289,6 +291,49 @@ class BootstrapTests(unittest.TestCase):
             validated = planner.validate_plan(plan.id)
 
             self.assertEqual(validated.status, PlanStatus.VALIDATED)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_knowledge_graph_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("knowledge_graph"))
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            self.assertIsInstance(knowledge_graph, IKnowledgeGraph)
+            self.assertIsInstance(knowledge_graph, KnowledgeGraph)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_knowledge_graph_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            self.assertEqual(knowledge_graph.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("knowledge_graph"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_knowledge_graph_supports_entities_and_relationships(self):
+        from argus.knowledge_graph import Entity, Relationship
+
+        application = bootstrap()
+
+        try:
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            alice = Entity(entity_type="person", name="Alice")
+            bob = Entity(entity_type="person", name="Bob")
+            knowledge_graph.add_entity(alice)
+            knowledge_graph.add_entity(bob)
+            knowledge_graph.add_relationship(
+                Relationship(source_entity_id=alice.id, target_entity_id=bob.id, relationship_type="knows")
+            )
+
+            self.assertEqual(knowledge_graph.neighbors(alice.id), (bob,))
         finally:
             application.shutdown()
 

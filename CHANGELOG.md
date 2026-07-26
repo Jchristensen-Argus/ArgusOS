@@ -729,3 +729,37 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `health_check()` is not reachable through `ConnectorManager` - only directly against a raw `IConnector` implementation.
 - `Connector.capabilities` is descriptive only - `invoke()` does not check that the requested operation is a member of it.
 - No persistence, no concurrency, no retries, no rollback for `invoke()`.
+
+## Package 018 - Knowledge Graph
+
+### Added
+
+- Added `argus/knowledge_graph/` package (Package 018 - Knowledge Graph):
+  - `entity.py` - `Entity`, an immutable dataclass describing one node: `entity_type` (required, non-empty), `name` (required, non-empty, not enforced unique), `id` (auto-generated), `attributes` (an immutable mapping). Pure data - no dependency on any other module in the package.
+  - `relationship.py` - `Relationship`, an immutable dataclass describing one directed edge: `source_entity_id`/`target_entity_id` (required, non-empty; reference `Entity.id` by id only, never a live object; self-loops permitted), `relationship_type` (required, non-empty), `id` (auto-generated), `attributes`. Also a pure, dependency-free leaf.
+  - `interfaces.py` - `IKnowledgeGraph(IService)`: `add_entity`, `remove_entity`, `get_entity`, `list_entities`, `add_relationship`, `remove_relationship`, `list_relationships`, `neighbors`, `find_by_type`, plus the inherited IService contract. Per this package's explicit "Extend IService" instruction, `IKnowledgeGraph` DOES inherit `IService` - but unlike every genuinely gated adopter, none of its own methods are lifecycle-gated, exactly mirroring `IntentRouter`'s (Package 009) shape. See the ADR Update below.
+  - `graph.py` - `KnowledgeGraph`: an in-memory registry of Entities and Relationships. `remove_entity()` cascades to remove every Relationship referencing the removed Entity, guaranteeing referential integrity by construction; `add_relationship()` rejects references to unknown Entities (`EntityNotFoundError`); `neighbors()` returns every distinct Entity connected to a given Entity by one hop, in either direction; `find_by_type()` filters Entities by `entity_type`.
+  - `exceptions.py` - `KnowledgeGraphError` (base), `InvalidEntityError`, `DuplicateEntityError`, `EntityNotFoundError`, `InvalidRelationshipError`, `DuplicateRelationshipError`, `RelationshipNotFoundError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/018_KNOWLEDGE_GRAPH.md`, including a note that no `design/specifications/KNOWLEDGE_GRAPH.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-017).
+- Extended `argus/events/event_types.py`'s `EventType` with four new members: `ENTITY_ADDED`, `ENTITY_REMOVED`, `RELATIONSHIP_ADDED`, `RELATIONSHIP_REMOVED` - exactly the four this package's work order named, no more.
+- Added `tests/test_entity.py` (6 new tests: the `Entity` model), `tests/test_relationship.py` (7 new tests: the `Relationship` model, including self-loops), `tests/test_knowledge_graph.py` (57 new tests: `KnowledgeGraph`, including cascading removal, invalid-reference rejection, neighbors deduplication, and event publication).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Knowledge Graph resolves from the Container, is registered but not started, and supports registering Entities/Relationships and querying neighbors end-to-end.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"knowledge_graph"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `KnowledgeGraph` (depends only on the Event Bus) immediately after the Planner and immediately before the Agent Runtime, registers it in the Container as `"knowledge_graph"`. Bootstrap order is now ... -> Planner -> Knowledge Graph -> Agent Runtime -> Connector Manager -> Register Core Services -> Application - the first insertion in this project's history to land in the *middle* of the existing construction sequence rather than being appended at the end. `_register_core_services` now registers eighteen core services. `CORE_SERVICES_VERSION` remains `"0.1.7"` - unchanged by this package. KnowledgeGraph's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - the Knowledge Graph has no dependency on, and no touchpoint with, any of them.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `KnowledgeGraph` DOES inherit `IService`, per explicit Founder instruction rather than this Engineer's own application of the criterion - the first such case recorded. Applying the criterion independently would not have suggested adoption (no method involves external calls, dispatch, or a genuine phase distinction); none of `KnowledgeGraph`'s methods are gated, making it the second zero-gated-method adopter after `IntentRouter` (009). Eighth adopter overall, still six genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- No persistence - Entities/Relationships are held only in memory.
+- No graph traversal algorithms (no shortest path, no multi-hop queries) and no inference, per this package's explicit Constraints.
+- Not yet consulted by the Planner or any other component - infrastructure only in this package.
+- `find_by_type()` filters Entities only; no relationship-type analogue exists.
+- No concurrency.

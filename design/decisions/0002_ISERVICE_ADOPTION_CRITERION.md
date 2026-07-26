@@ -582,3 +582,68 @@ to withhold adoption from packages that are pure metadata/reasoning
 stores. This ADR's Status remains `Proposed`, per standing
 instruction; only the Founder/Architect elevates it to `Accepted` or
 opens the follow-up package.
+
+## Empirical Finding (Package 018 - Knowledge Graph)
+
+`IKnowledgeGraph`, per the Founder's Package 018 work order, DOES
+inherit `IService` - but this package's finding is qualitatively
+different from every prior one recorded here. Every previous adoption
+or non-adoption decision (Packages 008-017) was this Engineer's own
+judgment call, applying ADR-0002's proposed criterion to a work order
+that left the question open. Package 018's work order does not leave
+it open: it states plainly, "Create: `IKnowledgeGraph` - Extend
+`IService`." Adoption itself was not a decision this Engineer made.
+
+Applying the criterion independently to this package's actual methods,
+however, would not have suggested adoption. `add_entity`,
+`remove_entity`, `get_entity`, `list_entities`, `add_relationship`,
+`remove_relationship`, `list_relationships`, `neighbors`, and
+`find_by_type` are all synchronous, in-memory data operations with no
+external call, no dispatch, and no phase distinction any of them could
+plausibly be gated on - the Objective states plainly, "It is an
+in-memory semantic graph... No graph algorithms yet... Only
+foundational graph operations." This is architecturally much closer to
+Capability Registry (013), Plugin Manager (014), and Planner (015) -
+three deliberate non-adopters - than to Agent Runtime (016) or
+Connector Manager (017), whose defining gated methods
+(`start_execution()`, `invoke()`) each reach into dispatch or external
+communication. No method on `KnowledgeGraph` was gated, since none
+plausibly could be without inventing a "queries only work when
+RUNNING" policy the work order never asked for (and one that would
+sit awkwardly next to "The Planner may consult the Knowledge Graph,"
+given bootstrap.py's standing "register only, never start" rule for
+every core service - a Planner consultation should not spuriously fail
+merely because nobody remembered to `start()` the graph).
+`KnowledgeGraph` therefore implements the full IService lifecycle
+boilerplate (`initialize()`/`start()`/`stop()`/`status()`) but gates
+none of its own domain methods - exactly mirroring `IntentRouter`'s
+(Package 009) identical shape, making `KnowledgeGraph` the **second**
+IService adopter in this codebase with zero gated methods.
+
+Eight adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+and now KnowledgeGraph), six of which are genuinely gated (all but
+IntentRouter and KnowledgeGraph). Ten core services exist that do not
+implement `IService` at all (Configuration, the Logger, the Event Bus,
+the Service Registry, the Lifecycle Manager, Knowledge Service, Memory
+Service, Capability Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance, with one addition worth
+flagging explicitly. A dedicated architectural package to resolve
+`IService.status()`'s duplication is still warranted, now for eight
+adopters rather than seven. But this package's finding surfaces a new
+question the criterion itself does not yet address: what should
+happen when an explicit Founder instruction to adopt `IService`
+diverges from what the criterion would independently conclude? This
+Engineer's approach here was to follow the explicit instruction
+faithfully (adoption is not this Engineer's call to make) while
+applying the criterion's own logic to the *narrower* question left
+open - which, if any, specific methods should be gated - and
+concluding "none," consistent with `IntentRouter`'s established
+precedent for exactly this shape of adopter. Whether ADR-0002 should
+be revised to explicitly acknowledge "IService adoption may also be
+directed rather than derived, in which case the criterion still
+governs gating" is a question for the Founder/Architect, not something
+this Engineer has resolved unilaterally. This ADR's Status remains
+`Proposed`, per standing instruction; only the Founder/Architect
+elevates it to `Accepted` or opens the follow-up package.

@@ -26,6 +26,7 @@ CORE_SERVICE_NAMES = (
     "intent_dispatcher",
     "plugin_manager",
     "planner",
+    "knowledge_graph",
     "agent_runtime",
     "connector_manager",
 )
