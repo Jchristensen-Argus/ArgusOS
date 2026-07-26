@@ -5,6 +5,7 @@ import unittest
 from argus.application import Application
 from argus.bootstrap import bootstrap
 from argus.capability import ICapabilityRegistry, CapabilityRegistry
+from argus.connectors import ConnectorManager, IConnectorManager
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -36,6 +37,7 @@ CORE_SERVICE_NAMES = (
     "plugin_manager",
     "planner",
     "agent_runtime",
+    "connector_manager",
 )
 
 
@@ -354,6 +356,53 @@ class BootstrapTests(unittest.TestCase):
             executions = agent_runtime.list_executions()
             self.assertEqual(len(executions), 1)
             self.assertEqual(executions[0].status, ExecutionStatus.FAILED)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_connector_manager_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("connector_manager"))
+            connector_manager = application.container.resolve("connector_manager")
+            self.assertIsInstance(connector_manager, IConnectorManager)
+            self.assertIsInstance(connector_manager, ConnectorManager)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_connector_manager_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            connector_manager = application.container.resolve("connector_manager")
+            self.assertEqual(connector_manager.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("connector_manager"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_one_built_in_mock_connector(self):
+        application = bootstrap()
+
+        try:
+            connector_manager = application.container.resolve("connector_manager")
+            connectors = connector_manager.list_connectors()
+            self.assertEqual(len(connectors), 1)
+            self.assertEqual(connectors[0].name, "Mock External System")
+            self.assertTrue(connectors[0].enabled)
+
+            connector_manager.initialize()
+            connector_manager.start()
+            try:
+                result = connector_manager.invoke(
+                    connectors[0].id, "mock_operation", payload={"k": "v"}
+                )
+                self.assertEqual(result["operation"], "mock_operation")
+                self.assertEqual(result["payload"], {"k": "v"})
+            finally:
+                connector_manager.stop()
         finally:
             application.shutdown()
 

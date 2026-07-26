@@ -533,3 +533,52 @@ existing gated engine) calls for one - even immediately following
 three consecutive packages that did not qualify. This ADR's Status
 remains `Proposed`, per standing instruction; only the Founder/Architect
 elevates it to `Accepted` or opens the follow-up package.
+
+## Empirical Finding (Package 017 - Connector Framework)
+
+`IConnectorManager`, per the Founder's Package 017 work order, DOES
+inherit `IService` - continuing the pattern set by `AgentRuntime`
+(Package 016) rather than the three-consecutive-non-adopter streak
+that preceded it (Capability Registry - 013, Plugin Manager - 014,
+Planner - 015). `ConnectorManager.invoke()` - the only method that
+actually reaches out to an external system's connector implementation
+(calling `connect()` then `invoke()` on it) - is genuinely gated on
+the manager's own lifecycle state being `RUNNING`, raising
+`InvalidConnectorStateError` otherwise. `register_connector()`,
+`unregister_connector()`, `get_connector()`, `list_connectors()`,
+`enable_connector()`, and `disable_connector()` remain ungated
+registry-style operations on individual Connectors, exactly mirroring
+`AgentRuntime`'s own pause/cancel/get/list precedent (Package 016) and
+every other metadata/reasoning registry's lookup methods in this
+codebase.
+
+The reasoning is the direct analogue of Package 016's: `invoke()` is
+"real, distinct work" in exactly the sense ADR-0002's criterion asks
+about - it is the single point through which ArgusOS reaches an
+external system (even a mocked one in Version 1), a strictly stronger
+case for gating than `IntentDispatcher.dispatch()` (which merely
+resolves and runs an internal Workflow) or `AgentRuntime.
+start_execution()` (which merely dispatches Intents). Not gating
+`invoke()` would let a caller invoke a connector before the framework
+was deliberately started, with no guardrail at all standing between
+"the object was constructed" and "an external call went out" - the
+same risk the criterion was written to catch.
+
+Seven adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, and now
+ConnectorManager), six of which are genuinely gated (all but
+IntentRouter). Ten core services exist that do not implement
+`IService` (Configuration, the Logger, the Event Bus, the Service
+Registry, the Lifecycle Manager, Knowledge Service, Memory Service,
+Capability Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged - a dedicated architectural package to
+resolve `IService.status()`'s duplication is still warranted, now for
+seven adopters rather than six. This package's finding reinforces
+Package 016's: the criterion continues to discriminate correctly,
+identifying a genuine adopter precisely where a package's actual
+purpose involves an effectful, gate-worthy operation, and continuing
+to withhold adoption from packages that are pure metadata/reasoning
+stores. This ADR's Status remains `Proposed`, per standing
+instruction; only the Founder/Architect elevates it to `Accepted` or
+opens the follow-up package.

@@ -696,3 +696,36 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `PlanStep.optional` has no effect on execution - a failed optional step still stops the entire run, per this package's unconditional Failure Rules.
 - No persistence, no concurrency, no retries, no rollback.
 - `pause_execution()`/`cancel_execution()` are only reachable on a `RUNNING` Execution via a reentrant call from within a dispatched step's own action - there is no out-of-band way to pause an in-progress `start_execution()` call, since Version 1 has no concurrency.
+
+## Package 017 - Connector Framework
+
+### Added
+
+- Added `argus/connectors/` package (Package 017 - Connector Framework):
+  - `connector.py` - `Connector`, an immutable dataclass describing one registered connector's metadata: `name`, `description`, `version`, `id` (auto-generated), `enabled` (default `True`), `capabilities` (a plain tuple of operation-name strings, unrelated to `argus.capability.Capability`), `metadata`. Pure data - holds no live implementation reference and has no dependency on any other module in the package, matching the established "pure leaf model" precedent.
+  - `interfaces.py` - `IConnector` (a plain ABC: `connect`/`disconnect`/`invoke`/`health_check` - the contract a connector implementation must satisfy) and `IConnectorManager(IService)`: `register_connector`, `unregister_connector`, `get_connector`, `list_connectors`, `enable_connector`, `disable_connector`, `invoke`, plus the inherited IService contract. Like Agent Runtime (016), and unlike Capability Registry/Plugin Manager/Planner (013-015), this package DOES inherit `IService` - see the ADR Update below.
+  - `manager.py` - `ConnectorManager`: an in-memory registry pairing `Connector` metadata with the live `IConnector` implementations that back them, keyed by the same id. `invoke()` is gated on the manager's own `RUNNING` state, requires the target connector to be `enabled`, calls the implementation's `connect()` (idempotent) immediately before its `invoke()`, and never calls `disconnect()` automatically. `register_connector`/`unregister_connector`/`get_connector`/`list_connectors`/`enable_connector`/`disable_connector` remain ungated registry operations. Also defines `MockConnector`, the one concrete `IConnector` implementation Version 1 ships - fully in-memory, no network, no I/O - placed here rather than in `connector.py` to avoid a circular import (see this package's own Architectural Decision 1).
+  - `exceptions.py` - `ConnectorError` (base), `InvalidConnectorError`, `DuplicateConnectorError`, `ConnectorNotFoundError`, `ConnectorDisabledError`, `InvalidConnectorStateError`, `ConnectorInvocationError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/017_CONNECTOR_FRAMEWORK.md`, including a note that no `design/specifications/CONNECTOR_FRAMEWORK.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-016).
+- Extended `argus/events/event_types.py`'s `EventType` with five new members: `CONNECTOR_REGISTERED`, `CONNECTOR_ENABLED`, `CONNECTOR_DISABLED`, `CONNECTOR_INVOKED`, `CONNECTOR_FAILED` - exactly the five this package's work order named, no more.
+- Added `tests/test_connector.py` (16 new tests: the `Connector` model and `MockConnector`'s own connect/disconnect/invoke/health_check state machine), `tests/test_connector_manager.py` (44 new tests: `ConnectorManager`, including duplicate registration, unknown-connector handling, enable/disable, gated `invoke()`, connect-failure and invoke-failure wrapping, and event publication).
+- Extended `tests/test_bootstrap.py` with three new tests confirming the Connector Manager resolves from the Container, is registered but not started, and that bootstrap's one built-in mock connector ("Mock External System") can be invoked successfully once the manager is explicitly started.
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"connector_manager"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `ConnectorManager` (depends only on the Event Bus) immediately after the Agent Runtime, registers it in the Container as `"connector_manager"`, and registers one built-in mock connector, "Mock External System," backed by a `MockConnector`. Bootstrap order is now ... -> Planner -> Agent Runtime -> Connector Manager -> Register Core Services -> Application. `_register_core_services` now registers seventeen core services. `CORE_SERVICES_VERSION` remains `"0.1.6"` - unchanged by this package, per its own explicit Constraints. ConnectorManager's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/runtime/`, `argus/planner/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, and `argus/plugins/` are all unchanged - the Connector Framework has no dependency on, and no touchpoint with, any of them.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `ConnectorManager` continues the pattern `AgentRuntime` set in Package 016: `invoke()` is genuinely gated, architecturally identical to (and arguably a stronger case than) `IntentDispatcher.dispatch()`/`AgentRuntime.start_execution()`, since it is the literal boundary between ArgusOS and external systems. Seventh adopter, sixth genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Known Limitations
+
+- No real integrations - `MockConnector` is Version 1's only `IConnector` implementation; no network I/O, authentication, or persistence of any kind.
+- `invoke()` never calls `disconnect()` automatically - a connector stays "connected" for the process lifetime once first invoked, unless something disconnects it directly (not exposed through `ConnectorManager`'s own API in Version 1).
+- `health_check()` is not reachable through `ConnectorManager` - only directly against a raw `IConnector` implementation.
+- `Connector.capabilities` is descriptive only - `invoke()` does not check that the requested operation is a member of it.
+- No persistence, no concurrency, no retries, no rollback for `invoke()`.

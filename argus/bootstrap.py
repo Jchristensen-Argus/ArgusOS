@@ -16,8 +16,9 @@ Purpose:
     factory/packages/012_INTENT_DISPATCHER.md,
     factory/packages/013_CAPABILITY_REGISTRY.md,
     factory/packages/014_PLUGIN_MANAGER.md,
-    factory/packages/015_PLANNER.md, and
-    factory/packages/016_AGENT_RUNTIME.md.
+    factory/packages/015_PLANNER.md,
+    factory/packages/016_AGENT_RUNTIME.md, and
+    factory/packages/017_CONNECTOR_FRAMEWORK.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -218,15 +219,48 @@ Startup Sequence:
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    18. Register the sixteen core services (Configuration, Logger,
+    18. Construct the Connector Manager (depends on the Event Bus
+        only) and register it with the Container, per Package 017.
+        Bootstrap is the only place that constructs ConnectorManager
+        directly; every other subsystem must resolve it from the
+        Container. Constructed immediately after the Agent Runtime,
+        per the Bootstrap section's explicit construction order
+        (Capability Registry -> Intent Dispatcher -> Planner -> Agent
+        Runtime -> Connector Manager) - unlike Planner/Intent
+        Dispatcher (Package 015) and AgentRuntime/Planner (Package
+        016), this ordering is NOT dependency-driven: ConnectorManager
+        has no functional dependency on the Capability Registry,
+        Intent Dispatcher, Planner, or Agent Runtime whatsoever - it
+        depends only on the Event Bus, exactly like Scheduler,
+        IntentRouter, and CapabilityRegistry. The work order simply
+        appends Connector Manager last in the construction sequence;
+        see argus/connectors/manager.py's module docstring and
+        factory/packages/017_CONNECTOR_FRAMEWORK.md's Architectural
+        Decisions for the full reasoning. Immediately after
+        construction, bootstrap.py registers one built-in mock
+        connector - "Mock External System" - backed by a
+        MockConnector implementation, per this package's explicit "No
+        real integrations yet. Use mock connectors only" requirement.
+        Like AgentRuntime, and unlike Capability Registry, Plugin
+        Manager, and Planner, ConnectorManager DOES implement
+        IService, with invoke() genuinely gated on the manager's own
+        RUNNING state - see argus/connectors/interfaces.py's
+        Architectural Note and ADR-0002's newly appended Empirical
+        Finding for this package. Like every other IService adopter,
+        it is registered only (LifecycleState.REGISTERED) here - its
+        own initialize()/start() are deliberately NOT called by this
+        package, for the same divergence-avoidance reasoning recorded
+        in ADR-0002 and already applied to every prior adopter.
+    19. Register the seventeen core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
         Engine, Conversation Manager, Capability Registry, Intent
-        Dispatcher, Plugin Manager, Planner, Agent Runtime) in the
-        Service Registry (identity/descriptive data only) and in the
-        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
-        None of them are initialized or started by this package.
-    19. Construct and start the Application.
+        Dispatcher, Plugin Manager, Planner, Agent Runtime, Connector
+        Manager) in the Service Registry (identity/descriptive data
+        only) and in the Lifecycle Manager, where each enters
+        LifecycleState.REGISTERED. None of them are initialized or
+        started by this package.
+    20. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
@@ -263,6 +297,7 @@ import functools
 from argus.application import Application
 from argus.capability import Capability, ICapabilityRegistry, CapabilityRegistry
 from argus.configuration import Configuration
+from argus.connectors import Connector, ConnectorManager, IConnectorManager, MockConnector
 from argus.container import Container
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import (
@@ -401,6 +436,24 @@ def bootstrap() -> Application:
     )
     container.register("agent_runtime", agent_runtime)
 
+    connector_manager = ConnectorManager(event_bus=event_bus)
+    connector_manager.register_connector(
+        Connector(
+            name="Mock External System",
+            description=(
+                "Built-in Version 1 connector demonstrating the "
+                "Connector Framework end to end. Backed by a "
+                "MockConnector implementation - per this package's "
+                "'No real integrations yet. Use mock connectors only' "
+                "requirement, it performs no network I/O of any kind."
+            ),
+            version="1.0.0",
+            capabilities=("mock_operation",),
+        ),
+        MockConnector(),
+    )
+    container.register("connector_manager", connector_manager)
+
     _register_core_services(
         service_registry=service_registry,
         lifecycle_manager=lifecycle_manager,
@@ -418,6 +471,7 @@ def bootstrap() -> Application:
         plugin_manager=plugin_manager,
         planner=planner,
         agent_runtime=agent_runtime,
+        connector_manager=connector_manager,
     )
 
     application = Application(container)
@@ -444,6 +498,7 @@ def _register_core_services(
     plugin_manager: IPluginManager,
     planner: IPlanner,
     agent_runtime: IAgentRuntime,
+    connector_manager: IConnectorManager,
 ) -> None:
     """
     Register the kernel's own core services with the Service Registry
@@ -459,15 +514,16 @@ def _register_core_services(
     Registry, the Lifecycle Manager, the Knowledge Service, the Memory
     Service, Scheduler, the Intent Router, the Workflow Engine, the
     Conversation Manager, the Capability Registry, the Intent
-    Dispatcher, the Plugin Manager, the Planner, and the Agent Runtime
-    is recorded as a ServiceDescriptor (identity and descriptive data
-    only, no runtime state) in the Service Registry, and as a
-    LifecycleState.REGISTERED entry in the Lifecycle Manager, which is
-    the sole owner of runtime lifecycle state for the Lifecycle
-    Manager's own purposes. Neither initialize() nor start() is called
-    on the Lifecycle Manager for any of them here. Scheduler, the
-    Intent Router, the Workflow Engine, the Conversation Manager, the
-    Intent Dispatcher, and the Agent Runtime are six of these sixteen
+    Dispatcher, the Plugin Manager, the Planner, the Agent Runtime, and
+    the Connector Manager is recorded as a ServiceDescriptor (identity
+    and descriptive data only, no runtime state) in the Service
+    Registry, and as a LifecycleState.REGISTERED entry in the
+    Lifecycle Manager, which is the sole owner of runtime lifecycle
+    state for the Lifecycle Manager's own purposes. Neither
+    initialize() nor start() is called on the Lifecycle Manager for
+    any of them here. Scheduler, the Intent Router, the Workflow
+    Engine, the Conversation Manager, the Intent Dispatcher, the Agent
+    Runtime, and the Connector Manager are seven of these seventeen
     that actually implement IService (see ADR-0002); the Capability
     Registry, the Plugin Manager, and the Planner deliberately do not
     (see argus/capability/interfaces.py's, argus/plugins/interfaces.py's,
@@ -496,6 +552,7 @@ def _register_core_services(
         plugin_manager: The Plugin Manager instance.
         planner: The Planner instance.
         agent_runtime: The Agent Runtime instance.
+        connector_manager: The Connector Manager instance.
     """
     core_services = (
         ("configuration", configuration, type(configuration)),
@@ -514,6 +571,7 @@ def _register_core_services(
         ("plugin_manager", plugin_manager, IPluginManager),
         ("planner", planner, IPlanner),
         ("agent_runtime", agent_runtime, IAgentRuntime),
+        ("connector_manager", connector_manager, IConnectorManager),
     )
 
     for name, instance, interface in core_services:

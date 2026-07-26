@@ -27,6 +27,7 @@ CORE_SERVICE_NAMES = (
     "plugin_manager",
     "planner",
     "agent_runtime",
+    "connector_manager",
 )
 
 

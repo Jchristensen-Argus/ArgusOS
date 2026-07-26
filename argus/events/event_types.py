@@ -229,3 +229,30 @@ class EventType(Enum):
     STEP_COMPLETED = "step_completed"
     EXECUTION_COMPLETED = "execution_completed"
     EXECUTION_FAILED = "execution_failed"
+
+    # Added by Package 017 - Connector Framework, per this module's
+    # own "single place new event types are added" scope note above.
+    # ConnectorManager publishes these on the existing Event Bus (see
+    # argus/connectors/manager.py). CONNECTOR_REGISTERED fires once
+    # per successful register_connector() call. CONNECTOR_ENABLED
+    # fires once per successful enable_connector() call (even if the
+    # connector was already enabled); CONNECTOR_DISABLED fires once
+    # per successful disable_connector() call (even if the connector
+    # was already disabled) - mirroring PLUGIN_ENABLED/PLUGIN_DISABLED's
+    # identical "fires regardless of prior state" precedent.
+    # CONNECTOR_INVOKED fires once per successful invoke() call, after
+    # the underlying connector implementation's connect() and invoke()
+    # calls both return without raising. CONNECTOR_FAILED fires
+    # instead - and the underlying error is re-raised, wrapped, to the
+    # caller - if either call raises, mirroring
+    # EXECUTION_FAILED/STEP_EXECUTION_ERROR's "publish then raise"
+    # precedent (Package 016). No dedicated event exists for
+    # unregister_connector(): this package's own Events section names
+    # exactly these five event types; matching PLAN_REMOVED's
+    # (Package 015) and pause/resume/cancel's (Package 016) precedent
+    # of not inventing an event beyond what was explicitly asked for.
+    CONNECTOR_REGISTERED = "connector_registered"
+    CONNECTOR_ENABLED = "connector_enabled"
+    CONNECTOR_DISABLED = "connector_disabled"
+    CONNECTOR_INVOKED = "connector_invoked"
+    CONNECTOR_FAILED = "connector_failed"
