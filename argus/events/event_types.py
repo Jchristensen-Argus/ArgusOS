@@ -278,3 +278,24 @@ class EventType(Enum):
     ENTITY_REMOVED = "entity_removed"
     RELATIONSHIP_ADDED = "relationship_added"
     RELATIONSHIP_REMOVED = "relationship_removed"
+
+    # Added by Package 019 - Memory Integration, per this module's own
+    # "single place new event types are added" scope note above.
+    # MemoryIntegration publishes these on the existing Event Bus (see
+    # argus/memory_integration/integration.py). MEMORY_SYNCHRONIZED
+    # fires once per successful synchronize_memory() call, after the
+    # corresponding graph Entity has been added or reconciled -
+    # regardless of whether any of that record's `related_keys`
+    # Relationships also succeeded. MEMORY_DESYNCHRONIZED fires once
+    # per successful remove_memory() call. MEMORY_MAPPING_FAILED fires
+    # for any translation or graph-application failure -
+    # Entity-level failures (synchronize_memory() also raises
+    # MemoryMappingError in that case) as well as individual
+    # Relationship-level failures, which are best-effort and do not
+    # raise or abort the surrounding synchronize_memory() call. None
+    # of the three fire for a failure that occurs before any Memory
+    # Service or Knowledge Graph call is attempted (for example, an
+    # unknown key, which raises InvalidMemoryRecordError directly).
+    MEMORY_SYNCHRONIZED = "memory_synchronized"
+    MEMORY_DESYNCHRONIZED = "memory_desynchronized"
+    MEMORY_MAPPING_FAILED = "memory_mapping_failed"

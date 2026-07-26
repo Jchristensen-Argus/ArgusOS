@@ -18,8 +18,9 @@ Purpose:
     factory/packages/014_PLUGIN_MANAGER.md,
     factory/packages/015_PLANNER.md,
     factory/packages/016_AGENT_RUNTIME.md,
-    factory/packages/017_CONNECTOR_FRAMEWORK.md, and
-    factory/packages/018_KNOWLEDGE_GRAPH.md.
+    factory/packages/017_CONNECTOR_FRAMEWORK.md,
+    factory/packages/018_KNOWLEDGE_GRAPH.md, and
+    factory/packages/019_MEMORY_INTEGRATION.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -234,40 +235,81 @@ Startup Sequence:
         called by this package, for the same divergence-avoidance
         reasoning recorded in ADR-0002 and already applied to every
         prior IService adopter.
-    18. Construct the Agent Runtime (depends on the Event Bus, the
+    18. Construct Memory Integration (depends on the Event Bus, the
+        Memory Service, and the Knowledge Graph) and register it with
+        the Container, per Package 019. Bootstrap is the only place
+        that constructs MemoryIntegration directly; every other
+        subsystem must resolve it from the Container. Constructed
+        immediately after the Knowledge Graph and immediately before
+        the Agent Runtime, per the Bootstrap section's explicit
+        construction order (Capability Registry -> Intent Dispatcher
+        -> Planner -> Knowledge Graph -> Memory Integration -> Agent
+        Runtime -> Connector Manager) - unlike the Knowledge Graph's
+        and Connector Manager's own purely-positional placements
+        (Packages 017-018), this ordering IS dependency-driven:
+        MemoryIntegration genuinely depends on a live IMemoryService
+        reference (constructed at step 8) and a live IKnowledgeGraph
+        reference (constructed immediately above, at step 17) -
+        Memory Integration is "the only component responsible for
+        translating memory records into graph entities and
+        relationships," per this package's own Architectural
+        Position, and cannot do that job without both. Per its work
+        order's explicit "Create: IMemoryIntegration - Extend
+        IService" instruction, MemoryIntegration DOES implement
+        IService - and, unlike the Knowledge Graph (Package 018),
+        applying ADR-0002's criterion independently to this package's
+        own methods *would* have suggested adoption on its own:
+        synchronize_memory()/synchronize_all()/remove_memory() each
+        perform genuine, effectful cross-system coordination (reading
+        IMemoryService, writing IKnowledgeGraph, in the same call) and
+        are genuinely gated on the RUNNING state;
+        synchronization_status()/reset() remain ungated, touching only
+        this service's own internal bookkeeping - see
+        argus/memory_integration/interfaces.py's Architectural Notes
+        and ADR-0002's newly appended Empirical Finding for this
+        package. Nothing in this package modifies argus/planner/ or
+        argus/runtime/, per its own explicit Constraints. It is
+        registered only (LifecycleState.REGISTERED) here, like every
+        other core service - its own initialize()/start() are
+        deliberately NOT called by this package, for the same
+        divergence-avoidance reasoning recorded in ADR-0002 and
+        already applied to every prior IService adopter.
+    19. Construct the Agent Runtime (depends on the Event Bus, the
         Intent Dispatcher, and the Planner) and register it with the
         Container, per Package 016. Bootstrap is the only place that
         constructs AgentRuntime directly; every other subsystem must
         resolve it from the Container. Constructed immediately after
-        the Knowledge Graph (previously immediately after the
-        Planner, before Package 018 inserted the Knowledge Graph
-        between them) - AgentRuntime's own dependencies are unchanged
-        and still reflect dependency order only (Planner, not
-        KnowledgeGraph), not the target architecture diagram's
-        top-to-bottom reading, the same distinction already drawn for
-        Capability Registry/Intent Dispatcher (Package 013) and
-        Planner/Intent Dispatcher (Package 015). AgentRuntime's only
-        touchpoint with the Planner is a read-only get_plan() call
-        inside start_execution(), used to confirm a given Plan's
-        canonical status is VALIDATED - it never calls create_plan(),
+        Memory Integration (previously immediately after the
+        Knowledge Graph, before Package 019 inserted Memory
+        Integration between them) - AgentRuntime's own dependencies
+        are unchanged and still reflect dependency order only
+        (Planner, not KnowledgeGraph or MemoryIntegration), not the
+        target architecture diagram's top-to-bottom reading, the same
+        distinction already drawn for Capability Registry/Intent
+        Dispatcher (Package 013) and Planner/Intent Dispatcher
+        (Package 015). AgentRuntime's only touchpoint with the
+        Planner is a read-only get_plan() call inside
+        start_execution(), used to confirm a given Plan's canonical
+        status is VALIDATED - it never calls create_plan(),
         add_step(), remove_step(), reorder_steps(), or validate_plan().
         Every actual execution effect happens through exactly one
         call: the injected IIntentDispatcher's dispatch() - AgentRuntime
         has no dependency anywhere on argus.workflow, argus.plugins,
-        or (per this package's own Architectural Position, "The
-        Runtime must not modify it") argus.knowledge_graph. Unlike
-        Capability Registry, Plugin Manager, and Planner (three
-        consecutive non-adopters), AgentRuntime DOES implement
-        IService, with start_execution()/resume_execution() genuinely
-        gated on the runtime's own RUNNING state - see
-        argus/runtime/interfaces.py's Architectural Note and
-        ADR-0002's newly appended Empirical Finding for that package.
-        Like every other IService adopter, it is registered only
-        (LifecycleState.REGISTERED) here - its own initialize()/
-        start() are deliberately NOT called by this package, for the
-        same divergence-avoidance reasoning recorded in ADR-0002 and
-        already applied to every prior adopter.
-    19. Construct the Connector Manager (depends on the Event Bus
+        argus.knowledge_graph, or argus.memory_integration ("The
+        Runtime must not modify it," per Package 018's own
+        Architectural Position, now also true of the bridge Package
+        019 built on top of it). Unlike Capability Registry, Plugin
+        Manager, and Planner (three consecutive non-adopters),
+        AgentRuntime DOES implement IService, with start_execution()/
+        resume_execution() genuinely gated on the runtime's own
+        RUNNING state - see argus/runtime/interfaces.py's
+        Architectural Note and ADR-0002's newly appended Empirical
+        Finding for that package. Like every other IService adopter,
+        it is registered only (LifecycleState.REGISTERED) here - its
+        own initialize()/start() are deliberately NOT called by this
+        package, for the same divergence-avoidance reasoning recorded
+        in ADR-0002 and already applied to every prior adopter.
+    20. Construct the Connector Manager (depends on the Event Bus
         only) and register it with the Container, per Package 017.
         Bootstrap is the only place that constructs ConnectorManager
         directly; every other subsystem must resolve it from the
@@ -276,32 +318,33 @@ Startup Sequence:
         like the Knowledge Graph's own placement (Package 018), this
         ordering is NOT dependency-driven: ConnectorManager has no
         functional dependency on the Capability Registry, Intent
-        Dispatcher, Planner, Knowledge Graph, or Agent Runtime
-        whatsoever - it depends only on the Event Bus. Immediately
-        after construction, bootstrap.py registers one built-in mock
-        connector - "Mock External System" - backed by a
-        MockConnector implementation, per Package 017's explicit "No
-        real integrations yet. Use mock connectors only" requirement.
-        Like AgentRuntime, and unlike Capability Registry, Plugin
-        Manager, and Planner, ConnectorManager DOES implement
-        IService, with invoke() genuinely gated on the manager's own
-        RUNNING state - see argus/connectors/interfaces.py's
-        Architectural Note and ADR-0002's newly appended Empirical
-        Finding for that package. Like every other IService adopter,
-        it is registered only (LifecycleState.REGISTERED) here - its
-        own initialize()/start() are deliberately NOT called by this
-        package, for the same divergence-avoidance reasoning recorded
-        in ADR-0002 and already applied to every prior adopter.
-    20. Register the eighteen core services (Configuration, Logger,
+        Dispatcher, Planner, Knowledge Graph, Memory Integration, or
+        Agent Runtime whatsoever - it depends only on the Event Bus.
+        Immediately after construction, bootstrap.py registers one
+        built-in mock connector - "Mock External System" - backed by
+        a MockConnector implementation, per Package 017's explicit
+        "No real integrations yet. Use mock connectors only"
+        requirement. Like AgentRuntime, and unlike Capability
+        Registry, Plugin Manager, and Planner, ConnectorManager DOES
+        implement IService, with invoke() genuinely gated on the
+        manager's own RUNNING state - see
+        argus/connectors/interfaces.py's Architectural Note and
+        ADR-0002's newly appended Empirical Finding for that package.
+        Like every other IService adopter, it is registered only
+        (LifecycleState.REGISTERED) here - its own initialize()/
+        start() are deliberately NOT called by this package, for the
+        same divergence-avoidance reasoning recorded in ADR-0002 and
+        already applied to every prior adopter.
+    21. Register the nineteen core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
         Engine, Conversation Manager, Capability Registry, Intent
-        Dispatcher, Plugin Manager, Planner, Knowledge Graph, Agent
-        Runtime, Connector Manager) in the Service Registry
-        (identity/descriptive data only) and in the Lifecycle Manager,
-        where each enters LifecycleState.REGISTERED. None of them are
-        initialized or started by this package.
-    21. Construct and start the Application.
+        Dispatcher, Plugin Manager, Planner, Knowledge Graph, Memory
+        Integration, Agent Runtime, Connector Manager) in the Service
+        Registry (identity/descriptive data only) and in the
+        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
+        None of them are initialized or started by this package.
+    22. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
@@ -355,6 +398,7 @@ from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.lifecycle import LifecycleManager
 from argus.logging_service import get_logger, initialize_logging
 from argus.memory import IMemoryService, JSONMemoryStorage, MemoryService
+from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.planner import IPlanner, Planner
 from argus.plugins import IPluginManager, Plugin, PluginManager
 from argus.runtime import AgentRuntime, IAgentRuntime
@@ -476,6 +520,11 @@ def bootstrap() -> Application:
     knowledge_graph = KnowledgeGraph(event_bus=event_bus)
     container.register("knowledge_graph", knowledge_graph)
 
+    memory_integration = MemoryIntegration(
+        memory_service=memory_service, knowledge_graph=knowledge_graph, event_bus=event_bus
+    )
+    container.register("memory_integration", memory_integration)
+
     agent_runtime = AgentRuntime(
         event_bus=event_bus, dispatcher=intent_dispatcher, planner=planner
     )
@@ -516,6 +565,7 @@ def bootstrap() -> Application:
         plugin_manager=plugin_manager,
         planner=planner,
         knowledge_graph=knowledge_graph,
+        memory_integration=memory_integration,
         agent_runtime=agent_runtime,
         connector_manager=connector_manager,
     )
@@ -544,6 +594,7 @@ def _register_core_services(
     plugin_manager: IPluginManager,
     planner: IPlanner,
     knowledge_graph: IKnowledgeGraph,
+    memory_integration: IMemoryIntegration,
     agent_runtime: IAgentRuntime,
     connector_manager: IConnectorManager,
 ) -> None:
@@ -562,22 +613,27 @@ def _register_core_services(
     Service, Scheduler, the Intent Router, the Workflow Engine, the
     Conversation Manager, the Capability Registry, the Intent
     Dispatcher, the Plugin Manager, the Planner, the Knowledge Graph,
-    the Agent Runtime, and the Connector Manager is recorded as a
-    ServiceDescriptor (identity and descriptive data only, no runtime
-    state) in the Service Registry, and as a LifecycleState.REGISTERED
-    entry in the Lifecycle Manager, which is the sole owner of runtime
-    lifecycle state for the Lifecycle Manager's own purposes. Neither
-    initialize() nor start() is called on the Lifecycle Manager for
-    any of them here. Scheduler, the Intent Router, the Workflow
-    Engine, the Conversation Manager, the Intent Dispatcher, the
-    Knowledge Graph, the Agent Runtime, and the Connector Manager are
-    eight of these eighteen that actually implement IService (see
-    ADR-0002) - though the Knowledge Graph, per its own explicit work
-    order instruction rather than an independent application of
-    ADR-0002's criterion, is the second of these eight (after the
-    Intent Router) with no method gated on the RUNNING state at all;
-    the Capability Registry, the Plugin Manager, and the Planner
-    deliberately do not implement IService at all (see
+    Memory Integration, the Agent Runtime, and the Connector Manager
+    is recorded as a ServiceDescriptor (identity and descriptive data
+    only, no runtime state) in the Service Registry, and as a
+    LifecycleState.REGISTERED entry in the Lifecycle Manager, which is
+    the sole owner of runtime lifecycle state for the Lifecycle
+    Manager's own purposes. Neither initialize() nor start() is called
+    on the Lifecycle Manager for any of them here. Scheduler, the
+    Intent Router, the Workflow Engine, the Conversation Manager, the
+    Intent Dispatcher, the Knowledge Graph, Memory Integration, the
+    Agent Runtime, and the Connector Manager are nine of these
+    nineteen that actually implement IService (see ADR-0002) - though
+    the Knowledge Graph, per its own explicit work order instruction
+    rather than an independent application of ADR-0002's criterion, is
+    the second of these nine (after the Intent Router) with no method
+    gated on the RUNNING state at all; Memory Integration, by
+    contrast, is both explicitly instructed to adopt IService AND
+    independently satisfies ADR-0002's criterion on its own merits
+    (synchronize_memory()/synchronize_all()/remove_memory() are
+    genuinely gated) - see ADR-0002's newly appended Empirical Finding
+    for Package 019. The Capability Registry, the Plugin Manager, and
+    the Planner deliberately do not implement IService at all (see
     argus/capability/interfaces.py's, argus/plugins/interfaces.py's,
     and argus/planner/interfaces.py's Architectural Notes). This
     function still does not call any IService adopter's
@@ -604,6 +660,7 @@ def _register_core_services(
         plugin_manager: The Plugin Manager instance.
         planner: The Planner instance.
         knowledge_graph: The Knowledge Graph instance.
+        memory_integration: The Memory Integration instance.
         agent_runtime: The Agent Runtime instance.
         connector_manager: The Connector Manager instance.
     """
@@ -624,6 +681,7 @@ def _register_core_services(
         ("plugin_manager", plugin_manager, IPluginManager),
         ("planner", planner, IPlanner),
         ("knowledge_graph", knowledge_graph, IKnowledgeGraph),
+        ("memory_integration", memory_integration, IMemoryIntegration),
         ("agent_runtime", agent_runtime, IAgentRuntime),
         ("connector_manager", connector_manager, IConnectorManager),
     )

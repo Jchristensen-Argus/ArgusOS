@@ -647,3 +647,82 @@ governs gating" is a question for the Founder/Architect, not something
 this Engineer has resolved unilaterally. This ADR's Status remains
 `Proposed`, per standing instruction; only the Founder/Architect
 elevates it to `Accepted` or opens the follow-up package.
+
+## Empirical Finding (Package 019 - Memory Integration)
+
+`IMemoryIntegration`, per the Founder's Package 019 work order, DOES
+inherit `IService` - again an explicit instruction, not this
+Engineer's own judgment call, continuing the new category of finding
+Package 018 introduced. Unlike Package 018's Knowledge Graph, however,
+applying ADR-0002's criterion independently to this package's actual
+methods *would also* have suggested adoption on its own -
+`synchronize_memory()`, `synchronize_all()`, and `remove_memory()`
+each perform genuine, effectful cross-system coordination: reading a
+record from `IMemoryService` and writing an Entity (and its
+Relationships) to `IKnowledgeGraph`, in the same call. This is
+architecturally much closer to `AgentRuntime.start_execution()`
+(Package 016) and `ConnectorManager.invoke()` (Package 017) - both
+genuinely gated - than to `KnowledgeGraph`'s own purely in-memory,
+single-system operations (Package 018), which is precisely why
+`KnowledgeGraph` gated nothing while `MemoryIntegration` gates three
+of its five methods. `synchronization_status()` and `reset()` remain
+ungated - both are pure operations over `MemoryIntegration`'s own
+internal bookkeeping only ("It owns no data itself"), never touching
+either `IMemoryService` or `IKnowledgeGraph`, matching
+`Scheduler.pause()`/`resume()`'s (Package 008) and every other
+ungated registry-style operation in this codebase.
+
+This package's finding directly resolves the open question Package
+018's finding raised, in the opposite direction: there, an explicit
+instruction and the criterion's own independent conclusion diverged
+(the criterion alone would not have suggested adoption). Here, they
+converge (the criterion alone *would* have suggested adoption,
+independent of the explicit instruction). Taken together, Packages
+018 and 019 give ADR-0002 its first paired evidence that "directed"
+(Founder-instructed) and "derived" (criterion-applied) IService
+adoption are genuinely separate questions that can agree or disagree
+in either package - the explicit instruction settles *whether* a
+class implements `IService`, while the criterion, applied
+independently and afterward by this Engineer, still correctly governs
+*which specific methods* are gated, regardless of which of the two
+routes led to inheriting `IService` in the first place.
+
+A distinct, unrelated naming issue also surfaced in this package,
+worth recording separately from the adoption question itself: this
+package's work order lists `status()` as one of `MemoryIntegration`'s
+five domain Responsibilities, but `IService.status()` is already a
+fixed abstract method returning `LifecycleState`, used identically by
+every other adopter in this codebase. A method cannot satisfy both
+contracts under one name without breaking Liskov substitution for any
+caller treating `MemoryIntegration` polymorphically as an `IService`.
+Resolved by naming the domain method `synchronization_status()`
+instead, preserving `status()` exclusively for lifecycle reporting
+everywhere in this codebase, with no exception - see
+`argus/memory_integration/interfaces.py`'s own Architectural Note for
+the full reasoning. This is a naming-collision resolution, not an
+adoption-criterion question, and does not itself bear on ADR-0002 -
+recorded here only because it was discovered in the course of this
+same package's IService integration work.
+
+Nine adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, and now MemoryIntegration), seven of which are
+genuinely gated (all but IntentRouter and KnowledgeGraph). Ten core
+services exist that do not implement `IService` at all (Configuration,
+the Logger, the Event Bus, the Service Registry, the Lifecycle
+Manager, Knowledge Service, Memory Service, Capability Registry,
+Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for nine adopters rather than eight. This package's
+finding, read alongside Package 018's, suggests ADR-0002 could
+usefully be revised to formally separate "adoption" (whether a class
+implements `IService` - which may be directed or derived) from
+"gating" (which specific methods are gated on `RUNNING` - which
+remains this Engineer's own criterion-driven judgment call regardless
+of how adoption was decided), rather than treating the two as a single
+combined decision as the ADR's current text implicitly does. This ADR's
+Status remains `Proposed`, per standing instruction; only the
+Founder/Architect elevates it to `Accepted`, revises its text, or opens
+the follow-up package.

@@ -7,6 +7,7 @@ from argus.bootstrap import bootstrap
 from argus.capability import ICapabilityRegistry, CapabilityRegistry
 from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
+from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.events import IEventBus, InMemoryEventBus
 from argus.conversation import IConversationManager, ConversationManager
 from argus.dispatcher import IIntentDispatcher, IntentDispatcher
@@ -38,6 +39,7 @@ CORE_SERVICE_NAMES = (
     "plugin_manager",
     "planner",
     "knowledge_graph",
+    "memory_integration",
     "agent_runtime",
     "connector_manager",
 )
@@ -334,6 +336,64 @@ class BootstrapTests(unittest.TestCase):
             )
 
             self.assertEqual(knowledge_graph.neighbors(alice.id), (bob,))
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_memory_integration_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("memory_integration"))
+            memory_integration = application.container.resolve("memory_integration")
+            self.assertIsInstance(memory_integration, IMemoryIntegration)
+            self.assertIsInstance(memory_integration, MemoryIntegration)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_memory_integration_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            memory_integration = application.container.resolve("memory_integration")
+            self.assertEqual(memory_integration.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("memory_integration"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_memory_integration_synchronizes_a_memory_record_end_to_end(self):
+        # bootstrap() constructs a real, disk-backed JSONMemoryStorage
+        # (per Package 007) - this test writes and then explicitly
+        # removes its own memory record in a finally block, so it
+        # leaves memory_store.json exactly as it found it regardless
+        # of outcome, and is safe to re-run.
+        from argus.memory import MemoryRecord
+
+        test_key = "bootstrap-test-key"
+        application = bootstrap()
+
+        try:
+            memory_service = application.container.resolve("memory_service")
+            knowledge_graph = application.container.resolve("knowledge_graph")
+            memory_integration = application.container.resolve("memory_integration")
+
+            if memory_service.exists(test_key):
+                memory_service.delete(test_key)
+            memory_service.put(MemoryRecord(key=test_key, value={"hello": "world"}))
+
+            try:
+                memory_integration.initialize()
+                memory_integration.start()
+                try:
+                    entity_id = memory_integration.synchronize_memory(test_key)
+                finally:
+                    memory_integration.stop()
+
+                self.assertEqual(knowledge_graph.get_entity(entity_id).name, test_key)
+            finally:
+                memory_service.delete(test_key)
         finally:
             application.shutdown()
 

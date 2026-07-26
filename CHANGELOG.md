@@ -763,3 +763,41 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Not yet consulted by the Planner or any other component - infrastructure only in this package.
 - `find_by_type()` filters Entities only; no relationship-type analogue exists.
 - No concurrency.
+
+## Package 019 - Memory Integration
+
+### Added
+
+- Added `argus/memory_integration/` package (Package 019 - Memory Integration):
+  - `mapper.py` - `MemoryMapper`: pure, side-effect-free translation only, calling neither `IMemoryService` nor `IKnowledgeGraph`. `memory_to_entity(record)` translates a `MemoryRecord` into a fresh `Entity` with a deterministic id (`f"memory:{key}"`, ensuring the same memory key always maps to the same graph Entity - the mechanism behind "prevent duplicate graph entities"). `memory_to_relationship(record)` recognizes one simple convention - a `"related_keys"` entry in a Mapping-shaped `value` - translating each reference into a `Relationship` (`relationship_type="related_to"`); a record without this convention produces no Relationships. `update_entity(existing, record)` produces an Entity's updated form, preserving `existing.id`. `remove_entity(key)` returns the deterministic Entity id for a bare key, with no lookup required.
+  - `interfaces.py` - `IMemoryIntegration(IService)`: `synchronize_memory`, `remove_memory`, `synchronize_all`, `synchronization_status`, `reset`, plus the inherited IService contract. Named `synchronization_status()`, not `status()` as the work order literally suggests, to avoid an unavoidable naming collision with `IService.status()` (which every other adopter in this codebase reserves exclusively for `LifecycleState` reporting) - see the Naming Collision note below.
+  - `integration.py` - `MemoryIntegration`: coordinates an injected `IMemoryService` and `IKnowledgeGraph` via an injected `MemoryMapper`. Every `synchronize_memory(key)` call is a full reconciliation - if the key was already synchronized, its Entity (and, via `IKnowledgeGraph`'s own cascading removal, every Relationship referencing it) is removed and rebuilt fresh from the record's current state, satisfying both "prevent duplicate graph entities" and "synchronize updates" with one mechanism. Entity-level failures raise `MemoryMappingError`; Relationship-level failures are best-effort, publishing `MEMORY_MAPPING_FAILED` without aborting the surrounding call. `synchronize_all()` synchronizes every record in the Memory Service, one failure never aborting the batch. `synchronize_memory()`/`synchronize_all()`/`remove_memory()` are gated on the service's own `RUNNING` state; `synchronization_status()`/`reset()` remain ungated. `reset()` clears only `MemoryIntegration`'s own internal bookkeeping (which keys are synchronized, and to what Entity id) - it never touches the Memory Service's records or the Knowledge Graph's Entities/Relationships, per this package's explicit "It owns no data itself."
+  - `exceptions.py` - `MemoryIntegrationError` (base), `InvalidMemoryRecordError`, `MemoryMappingError`, `MemoryNotSynchronizedError`, `InvalidMemoryIntegrationStateError`.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/019_MEMORY_INTEGRATION.md`, including a note that no `design/specifications/MEMORY_INTEGRATION.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-018).
+- Extended `argus/events/event_types.py`'s `EventType` with three new members: `MEMORY_SYNCHRONIZED`, `MEMORY_DESYNCHRONIZED`, `MEMORY_MAPPING_FAILED` - exactly the three this package's work order named, no more.
+- Added `tests/test_memory_mapper.py` (20 new tests: `MemoryMapper`'s pure translation methods, including the `related_keys` convention and its edge cases), `tests/test_memory_integration.py` (41 new tests: `MemoryIntegration`, including duplicate synchronization, update-in-place, removal cascade, best-effort relationship failures, batch synchronization, and lifecycle gating).
+- Extended `tests/test_bootstrap.py` with three new tests confirming Memory Integration resolves from the Container, is registered but not started, and can synchronize a real Memory Service record into the Knowledge Graph end-to-end (with explicit cleanup, since `bootstrap()`'s Memory Service is disk-backed).
+- Synchronized the repository's pre-existing stray duplicate `argus/tests/test_bootstrap.py`: added `"memory_integration"` to its `CORE_SERVICE_NAMES` tuple only, per the standing instruction (introduced in Package 011) to keep both bootstrap registration tests synchronized whenever a new core service is added.
+
+### Changed
+
+- `argus/bootstrap.py` now constructs `MemoryIntegration` (depends on the Event Bus, the Memory Service, and the Knowledge Graph) immediately after the Knowledge Graph and immediately before the Agent Runtime, registers it in the Container as `"memory_integration"`. Bootstrap order is now ... -> Knowledge Graph -> Memory Integration -> Agent Runtime -> Connector Manager -> Register Core Services -> Application. `_register_core_services` now registers nineteen core services. `CORE_SERVICES_VERSION` remains `"0.1.8"` - unchanged by this package. MemoryIntegration's own `initialize()`/`start()` are deliberately **not** called during bootstrap, for the same divergence-avoidance reasoning already applied to every prior `IService` adopter.
+- `argus/memory/`, `argus/knowledge_graph/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - Memory Integration consumes only their existing, unmodified public interfaces.
+
+### ADR Update
+
+- ADR-0002 (`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`) remains `Proposed`, per standing instruction. `MemoryIntegration` DOES inherit `IService`, per explicit Founder instruction - but unlike Package 018's Knowledge Graph, applying the criterion independently to this package's own methods *would also* have suggested adoption: `synchronize_memory()`/`synchronize_all()`/`remove_memory()` are genuinely gated. This is the first case where an explicit adoption instruction and the criterion's own independent conclusion agree, directly contrasting with Package 018's divergent case - together the two packages suggest ADR-0002 could formally separate "adoption" from "gating" as distinct questions. Ninth adopter overall, seventh genuinely gated. See `IMPLEMENTATION_REPORT.md`'s ADR Recommendation section.
+
+### Naming Collision
+
+- This package's work order lists `status()` as a Responsibility, but `IService.status()` is a fixed abstract method (`-> LifecycleState`) used identically by every other adopter in this codebase. Resolved by naming the domain method `synchronization_status()` instead - see `argus/memory_integration/interfaces.py`'s Architectural Note.
+
+### Known Limitations
+
+- Resynchronizing an Entity can silently drop inbound Relationships created by other entities' syncs, since only the resynchronized Entity's own outgoing Relationships are rebuilt.
+- No persistence - synchronization bookkeeping is held only in memory.
+- No AI reasoning, no graph inference - `related_keys` is the only relationship signal recognized.
+- No vector search.
+- `synchronize_all()`'s per-record relationship resolution depends on `IMemoryService.list()`'s (unordered) iteration order; a second pass resolves any references that failed on the first.
+- No concurrency.

@@ -27,6 +27,7 @@
 - [x] Agent Runtime (Execution, ExecutionStatus, IAgentRuntime, AgentRuntime, Package 016)
 - [x] Connector Framework (Connector, IConnector, IConnectorManager, ConnectorManager, MockConnector, Package 017)
 - [x] Knowledge Graph (Entity, Relationship, IKnowledgeGraph, KnowledgeGraph, Package 018)
+- [x] Memory Integration (MemoryMapper, IMemoryIntegration, MemoryIntegration, Package 019)
 
 ---
 
