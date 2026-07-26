@@ -872,3 +872,38 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - The injected `IReasoningEngine` dependency is not called anywhere in Version 1 - see the ADR Update section and `argus/decision/interfaces.py`'s own Architectural Note.
 - The Planner does not yet consume the Decision Engine, per this package's own explicit Version 1 scope limit.
 - No concurrency.
+
+## Package 022 - Cognitive Context
+
+### Added
+
+- Added `argus/context/` package (Package 022 - Cognitive Context):
+  - `context.py` - `CognitiveContext`: an immutable transport object (`context_id`, `conversation_id`, `memory_references`, `knowledge_references`, `reasoning_results`, `decision_references`, `metadata`). `reasoning_results` holds actual `ReasoningResult` objects, directly reusing `Decision.reasoning_results`' (Package 021) own field name and type; `memory_references`/`knowledge_references`/`decision_references` hold plain identifier strings, not live objects - what makes "shall NOT modify any contained object" and "shall NOT own persistence" true by construction. Pure data, no validation of its own - validation lives in `ContextBuilder`, matching the "pure leaf" precedent set by every prior value object in this codebase.
+  - `metadata.py` - `ContextMetadata`: an immutable value object (`created_at`, `version`, `correlation_id`, `extra`) reconciling the work order's "arbitrary metadata" and "creation timestamp, version, correlation identifier" descriptions into a single field - the three named fields are system-assigned, `extra` is the open-ended, caller-supplied mapping.
+  - `builder.py` - `ContextBuilder`: a mutable, fluent builder implementing `ICognitiveContextBuilder` - `with_conversation`/`with_memory`/`with_knowledge`/`with_reasoning`/`with_decision`/`with_metadata`/`build`. "The builder is mutable. The resulting context is immutable." `with_memory()`/`with_knowledge()`/`with_reasoning()`/`with_decision()` accumulate across calls; `with_conversation()` and repeated `with_metadata()` calls on the same key overwrite (last call wins). `build()` performs no additional validation and returns a fresh, independent `CognitiveContext` snapshot every time it is called.
+  - `interfaces.py` - `ICognitiveContextBuilder(ABC)` - explicitly NOT `IService`: "This is not an IService... This package intentionally introduces no new core service. This is the first infrastructure package since the early foundation that does not expand the service registry." Matches `IConnector`'s (Package 017) own "plain behavior, not a lifecycle-managed service" precedent.
+  - `exceptions.py` - `ContextError` (base), `InvalidContextError` - raised only by `ContextBuilder`'s `with_*` methods for malformed input.
+  - `__init__.py` - re-exports the package's public API.
+- Added `factory/packages/022_COGNITIVE_CONTEXT.md`, including a note that no `design/specifications/COGNITIVE_CONTEXT.md` exists (this package implements the Founder's explicit work order directly, the same situation as Packages 002, 009-021).
+- Added `tests/test_context.py` (15 new tests), `tests/test_context_builder.py` (20 new tests), `tests/test_context_metadata.py` (10 new tests) covering immutability, builder chaining, builder validation, metadata creation, empty/populated contexts, invalid construction, equality semantics, and build() independence across multiple calls.
+
+### Not Changed
+
+- **`argus/bootstrap.py` was intentionally left unchanged** - Package 022 registers no new core service, per this package's own explicit "No bootstrap registration. No lifecycle integration. No service registration" Constraint. `CORE_SERVICES_VERSION` remains `"0.2.1"`.
+- **`argus/events/event_types.py` was intentionally left unchanged** - no new `EventType` members. "No new EventTypes. This package is intentionally passive."
+- **`tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` were intentionally left unchanged** - no `CORE_SERVICE_NAMES` sync was needed, since this package registers no core service.
+- `argus/decision/`, `argus/reasoning/`, `argus/knowledge_graph/`, `argus/memory_integration/`, `argus/planner/`, `argus/runtime/`, `argus/dispatcher/`, `argus/capability/`, `argus/workflow/`, `argus/plugins/`, and `argus/connectors/` are all unchanged - `CognitiveContext` consumes only `ReasoningResult`, an existing, unmodified type. Per this package's own explicit instruction, neither the Planner nor the Decision Engine consume the Cognitive Context yet.
+
+### ADR Update
+
+- Not applicable - this package introduces no `IService` adopter. `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` was not modified.
+
+### Known Limitations
+
+- No lifecycle, no service registration - `CognitiveContext`/`ContextBuilder` carry no `IService` contract of any kind.
+- No events - this package publishes nothing.
+- No persistence, no serialization - a `CognitiveContext` exists only in memory for as long as a caller holds a reference to it.
+- The Planner does not yet consume the Cognitive Context, per this package's own explicit Version 1 scope limit.
+- The Decision Engine does not yet consume the Cognitive Context, per this package's own explicit Version 1 scope limit.
+- `memory_references`/`knowledge_references`/`decision_references` are opaque identifier strings - `CognitiveContext` performs no lookup, dereferencing, or validation that a given identifier corresponds to an existing record.
+- No concurrency.
