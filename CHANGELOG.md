@@ -980,3 +980,40 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - Only `cognitive_context.context_id` is carried through for traceability - `memory_references`/`knowledge_references`/`reasoning_results`/`decision_references` are not read or reflected anywhere in the resulting Plan.
 - The Planner is still not automatically wired into the pipeline - `plan_session()` is available to any caller with a `PlanningSession` in hand, but no future-package-style automatic pipeline stage exists yet.
 - No AI, no optimization, no persistence, no concurrency - unchanged from Package 015.
+
+## Package 025 - Cognitive Pipeline
+
+### Added
+
+- Added `argus/pipeline/` (`__init__.py`, `pipeline.py`, `request.py`, `result.py`, `interfaces.py`, `exceptions.py`) - the first-generation Cognitive Pipeline, orchestrating the existing cognitive architecture end-to-end: `User Request -> Cognitive Pipeline -> Conversation -> ... -> Context -> Planning Session -> Planner -> Validated Plan`. "It does not introduce new reasoning. It does not introduce AI. It does not change planner behavior. Its responsibility is orchestration only."
+- `PipelineRequest` (`argus/pipeline/request.py`) - immutable, carries the existing `ConversationSession` directly (`conversation`, `request_id`, `metadata`). "The request contains the existing Conversation object. Do not introduce raw text processing here."
+- `PipelineResult` (`argus/pipeline/result.py`) - immutable, `conversation`, `cognitive_context`, `planning_session`, `plan`, `pipeline_id`, `metadata`. "No execution results. No runtime state."
+- `ICognitivePipeline` (`argus/pipeline/interfaces.py`) - inherits `IService`, per explicit instruction; declares one abstract method, `run(request: PipelineRequest) -> PipelineResult`.
+- `CognitivePipeline` (`argus/pipeline/pipeline.py`) - implements `ICognitivePipeline`. `run()` performs exactly six steps: accept the `PipelineRequest`, obtain its `ConversationSession`, build a `CognitiveContext` via `ContextBuilder`, build a `PlanningSession` via `PlanningSessionBuilder` (embedding that same `CognitiveContext`), invoke `Planner.plan_session()`, return the `PipelineResult`. Depends on exactly one injected collaborator, `IPlanner`; holds no `IEventBus` reference at all, since it performs no direct event publication of its own - every event the pipeline's own orchestration produces fires from inside `Planner.plan_session()`'s pre-existing delegated calls.
+- `PipelineError`, `InvalidPipelineRequestError`, `PipelineExecutionError` (`argus/pipeline/exceptions.py`) - `InvalidPipelineRequestError` for a non-`PipelineRequest` argument or a `PipelineRequest.conversation` that is not a `ConversationSession`; `PipelineExecutionError` wraps (`raise ... from error`) any exception `Planner.plan_session()` raises, the same "wrap a delegate's own exception" shape `RuleEvaluationError` (Package 021) established; `PipelineError` directly, for an invalid `IService` lifecycle transition or calling `run()` while not `RUNNING`.
+- Metadata propagation: every key in `PipelineRequest.metadata`, plus `request_id` itself, is carried into the built `CognitiveContext.metadata.extra`, the built `PlanningSession.metadata.extra`, and `PipelineResult.metadata` directly - three independently observable propagation points.
+- Added `factory/packages/025_COGNITIVE_PIPELINE.md`.
+- Added `tests/test_pipeline.py` (34 new tests), `tests/test_pipeline_request.py` (11 new tests), `tests/test_pipeline_result.py` (10 new tests) - covering lifecycle gating, empty/populated conversations, orchestration order, planner invocation, immutable results, pipeline output, dependency failures, and metadata propagation.
+- Added 3 new tests to `tests/test_bootstrap.py` (`cognitive_pipeline` registered in the container; not started by `bootstrap()` itself; a full end-to-end `initialize()`/`start()`/`run()`/`stop()` call against the real bootstrapped `Planner`).
+
+### Changed
+
+- `argus/bootstrap.py`: registered `CognitivePipeline` as the twenty-second core service and twelfth `IService` adopter - "the first new runtime service since Package 021." Constructed immediately after `connector_manager`, depending on `planner` alone (already constructed earlier in the sequence). Startup Sequence gained a new step 23 ("Construct the Cognitive Pipeline"); the prior steps 23/24 renumbered to 24/25; `_register_core_services()` gained a `cognitive_pipeline: ICognitivePipeline` parameter and the twenty-second entry in its `core_services` tuple.
+- `tests/test_bootstrap.py` / `argus/tests/test_bootstrap.py`: `CORE_SERVICE_NAMES` synced to include `"cognitive_pipeline"`, per the standing Package 011 rule for the duplicate tree.
+
+### Not Changed
+
+- **`argus/runtime/`, `argus/decision/`, `argus/reasoning/`, `argus/context/`, `argus/planning/`, and `argus/planner/` are all unchanged** - "Runtime: No changes. Planner: No changes... Decision Engine: No changes. Cognitive Context: No changes. Planning Session: No changes."
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes. Reuse existing planner behavior."
+- No AI or LLM integration, no persistence, no workflow execution - "The pipeline is an orchestrator only."
+
+### ADR Update
+
+- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` gained an Empirical Finding for Package 025. `ICognitivePipeline` inheriting `IService` was again an explicit instruction, but this time ADR-0002's criterion, applied independently to `run()`'s genuinely effectful multi-step orchestration, would have suggested adoption on its own too - making `CognitivePipeline` the **second** convergent case in this codebase, after Memory Integration (Package 019), and the direct opposite of Packages 018/020/021's divergent pattern. `run()` is the pipeline's sole public method and is genuinely gated on `RUNNING`.
+
+### Known Limitations
+
+- The `PlanningSession` a `CognitivePipeline` builds always has empty `goals`/`constraints` - the pipeline has no dependency on the Reasoning Engine or Decision Engine in Version 1, so it has no source to populate them from; the resulting `Plan` therefore always has zero steps.
+- `CognitivePipeline` holds no `IEventBus` reference - by design, since it has nothing of its own to publish.
+- No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
+- The pipeline is not yet invoked automatically by anything - it is available to any caller holding a `PipelineRequest`, but no automatic trigger (a Connector, a Scheduler tick, or similar) exists yet.

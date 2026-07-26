@@ -921,3 +921,89 @@ consecutive directed-adoption data points (three divergent, one
 convergent) rather than three. This ADR's Status remains `Proposed`,
 per standing instruction; only the Founder/Architect elevates it to
 `Accepted`, revises its text, or opens the follow-up package.
+
+---
+
+## Empirical Finding (Package 025 - Cognitive Pipeline)
+
+`ICognitivePipeline`, per the Founder's Package 025 work order, DOES
+inherit `IService` - once again an explicit instruction, not this
+Engineer's own judgment call ("Register the Cognitive Pipeline as a
+core service. This is the first new runtime service since Package
+021."). Applying ADR-0002's criterion independently to this package's
+one public method, however, WOULD have suggested adoption on its own
+this time - the same convergence Package 019's Memory Integration
+exhibited, and the direct opposite of Packages 018, 020, and 021's
+divergent pattern. `CognitivePipeline` has exactly one public method,
+`run()`, and it is not a synchronous, in-memory, single-system lookup
+of the kind `KnowledgeGraph.query()` (Package 018),
+`ReasoningEngine.infer()` (Package 020), or
+`DecisionEngine.evaluate()` (Package 021) perform. `run()` builds two
+fresh, immutable transport objects in sequence - a `CognitiveContext`
+via `ContextBuilder`, then a `PlanningSession` via
+`PlanningSessionBuilder`, the second embedding the first - and then
+invokes a live, injected `Planner` service's own `plan_session()`,
+propagating the resulting `Plan` (and any exception it raises)
+straight back to the caller. This is genuinely effectful, multi-step
+orchestration across a live downstream service, architecturally the
+same kind of "active work" that made `ConversationManager.receive()`
+(Package 011), `AgentRuntime`'s pause/cancel/get/list surface (Package
+016), `ConnectorManager.invoke()` (Package 017), and
+`MemoryIntegration`'s three methods (Package 019) genuinely gated,
+rather than the zero-gated shape of Packages 009, 018, 020, and 021.
+`CognitivePipeline` therefore gates its sole public method
+(`run()` raises `PipelineError` unless `status()` is `RUNNING`) -
+making it the **second** IService adopter in this codebase, after
+Memory Integration (Package 019), where explicit instruction-to-adopt
+and ADR-0002's criterion applied independently arrive at the same
+answer, rather than diverging as in Packages 018, 020, and 021.
+
+This finding also updates the running tally the last four packages'
+findings have been building. Packages 018, 020, and 021 diverged
+(instructed to adopt; criterion alone would not have gated anything);
+Package 019 converged; and now Package 025 converges a second time.
+Read across all five directed-adoption data points to date, the
+picture is three divergent, two convergent - not yet enough to call
+either shape "typical," but enough to reinforce, for a second time,
+that "was `IService` adoption itself instructed" and "does the
+criterion's own gating logic agree" remain genuinely independent
+questions, exactly as Package 019's finding first proposed and
+Packages 020-021's findings each restated.
+
+A related, narrower point specific to this package: `CognitivePipeline`
+is the first `IService` adopter in this codebase to hold no
+`IEventBus` reference at all. Every other adopter, gated or not,
+either publishes events directly or is positioned to in a future
+version; `CognitivePipeline` was explicitly instructed not to ("Pipeline
+shall not: perform direct event publication. No new EventTypes. Reuse
+existing planner behavior."), and Version 1 gives it no work that
+would require one - all events the pipeline's own orchestration causes
+(`PLAN_CREATED`, `PLAN_UPDATED`) fire from inside `Planner
+.plan_session()`'s own already-existing delegated calls, not from the
+pipeline itself. This is a dependency-shape observation, not an
+adoption-criterion question, and does not itself bear on ADR-0002 -
+recorded here only because it was discovered in the course of this
+same package's IService integration work, and because it is the
+clearest example yet in this codebase of an adopter whose gating is
+justified purely by orchestration effect, not by any event it emits.
+
+Twelve adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, DecisionEngine,
+and now CognitivePipeline), eight of which are genuinely gated (all
+but IntentRouter, KnowledgeGraph, ReasoningEngine, and DecisionEngine).
+Ten core services exist that do not implement `IService` at all
+(Configuration, the Logger, the Event Bus, the Service Registry, the
+Lifecycle Manager, Knowledge Service, Memory Service, Capability
+Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for twelve adopters rather than eleven. This package's
+finding, read alongside Packages 018-021, keeps the case for formally
+separating "adoption" from "gating" as distinct questions open rather
+than settled - now five directed-adoption data points (three
+divergent, two convergent) instead of four (three divergent, one
+convergent). This ADR's Status remains `Proposed`, per standing
+instruction; only the Founder/Architect elevates it to `Accepted`,
+revises its text, or opens the follow-up package.

@@ -32,6 +32,7 @@ CORE_SERVICE_NAMES = (
     "decision_engine",
     "agent_runtime",
     "connector_manager",
+    "cognitive_pipeline",
 )
 
 

@@ -8,6 +8,7 @@ from argus.capability import ICapabilityRegistry, CapabilityRegistry
 from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
+from argus.pipeline import ICognitivePipeline, CognitivePipeline, PipelineRequest
 from argus.reasoning import IReasoningEngine, ReasoningEngine
 from argus.decision import IDecisionEngine, DecisionEngine
 from argus.events import IEventBus, InMemoryEventBus
@@ -46,6 +47,7 @@ CORE_SERVICE_NAMES = (
     "decision_engine",
     "agent_runtime",
     "connector_manager",
+    "cognitive_pipeline",
 )
 
 
@@ -628,6 +630,59 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(result["payload"], {"k": "v"})
             finally:
                 connector_manager.stop()
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_cognitive_pipeline_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("cognitive_pipeline"))
+            cognitive_pipeline = application.container.resolve("cognitive_pipeline")
+            self.assertIsInstance(cognitive_pipeline, ICognitivePipeline)
+            self.assertIsInstance(cognitive_pipeline, CognitivePipeline)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_cognitive_pipeline_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            cognitive_pipeline = application.container.resolve("cognitive_pipeline")
+            self.assertEqual(cognitive_pipeline.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("cognitive_pipeline"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_cognitive_pipeline_orchestrates_planner_end_to_end(self):
+        # Like the Agent Runtime's own end-to-end bootstrap test,
+        # run() is gated on RUNNING, so this test manually exercises
+        # CognitivePipeline's own IService lifecycle (never done by
+        # bootstrap.py itself) before calling run().
+        from argus.conversation import ConversationSession
+
+        application = bootstrap()
+
+        try:
+            cognitive_pipeline = application.container.resolve("cognitive_pipeline")
+            conversation = ConversationSession()
+
+            cognitive_pipeline.initialize()
+            cognitive_pipeline.start()
+            try:
+                result = cognitive_pipeline.run(
+                    PipelineRequest(conversation=conversation, metadata={"source": "test"})
+                )
+                self.assertIs(result.conversation, conversation)
+                self.assertEqual(result.cognitive_context.conversation_id, conversation.id)
+                self.assertIs(result.planning_session.cognitive_context, result.cognitive_context)
+                self.assertEqual(result.plan.steps, ())
+                self.assertEqual(result.metadata["source"], "test")
+            finally:
+                cognitive_pipeline.stop()
         finally:
             application.shutdown()
 
