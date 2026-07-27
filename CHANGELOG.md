@@ -1411,3 +1411,40 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **Resolution behavior is unchanged from Package 034** - this package changes only how the Task reaches `CapabilityExecutor`, not what happens once it arrives.
 - **`CapabilityContextBuilder` is not a bootstrap-level service** - by design.
 - No persistence, no concurrency, no scheduling - unchanged from every prior package in this phase.
+
+---
+
+## Package 036 - Project Framework
+
+### Added
+
+- Added `argus/project/` (`__init__.py`, `project.py`, `metadata.py`, `builder.py`, `status.py`, `interfaces.py`, `exceptions.py`) - the first-generation Project domain. "A Project is the top-level organizational unit for long-running work... Projects own Goals. Goals own Plans. Plans own Tasks."
+- `Project` (`argus/project/project.py`) - immutable, `project_id`, `name`, `description`, `status`, `metadata`. Every field defaults - `Project()` is always valid - the same "value object with a dedicated builder" shape used since Package 022, directly mirroring `Task`'s own shape (029) minus `relationships`.
+- `ProjectStatus` (`argus/project/status.py`) - a plain `Enum` (not a `str` subclass), five members: `PLANNING`, `ACTIVE`, `PAUSED`, `COMPLETED`, `ARCHIVED`. No transition logic. `PLANNING` is the default; unlike every prior status enum in this codebase, no member is reserved-but-unproduced.
+- `ProjectMetadata` (`argus/project/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra`. The first metadata module whose own "Suggested fields" list diverges in composition (not just order) from the established `created_at`/`correlation_id`/`version`/`extra` quartet - resolved by keeping the established quartet and adding the two explicitly-suggested domain fields, `owner` and `tags`, rather than replacing the quartet outright. See Engineering Decision below.
+- `ProjectBuilder` / `IProjectBuilder` (`argus/project/builder.py`, `argus/project/interfaces.py`) - "Builder is the only mutable object." `with_name()`/`with_description()`/`with_status()` are singular, overwritten not accumulated; `with_metadata(key, value)` accumulates into `ProjectMetadata.extra` only. No `with_project_id()`, no `with_owner()`, no `with_tags()` - `owner`/`tags` are treated as system-managed fields, joining `created_at`/`version`/`correlation_id` as not builder-overridable in Version 1.
+- `ProjectError`, `InvalidProjectError` (`argus/project/exceptions.py`).
+- Added `factory/packages/036_PROJECT_FRAMEWORK.md`.
+- Added `tests/test_project.py`, `tests/test_project_builder.py`, `tests/test_project_metadata.py`, `tests/test_project_status.py` - 72 new tests, entirely additive.
+
+### Changed
+
+- Nothing. This is the first package in this codebase's history to modify zero pre-existing files - purely additive to `argus/project/` and this package's own documentation.
+
+### Not Changed
+
+- **No changes to Planner, Execution, Capability, Response, Runtime, or Bootstrap.** Confirmed via `git diff --stat` showing zero lines changed outside `argus/project/` and the four documentation files.
+- **No `Goal` object introduced, even minimally.** "Do NOT... redesign Goal" - `Project` is genuinely standalone in Version 1, with no field referencing `Goal`, `Plan`, or `Task`.
+- **No ownership relationships implemented** - Goals, Documents, Knowledge, Conversations, Assets, Campaigns are all documented as future relationships only, per this package's own explicit "Do not implement those relationships yet. Simply document them."
+- **No persistence, no AI, no plugins, no automation** - "Project is a passive domain object only."
+
+### Engineering Decision
+
+- `ProjectMetadata`'s own "Suggested fields" list (`created_at, owner, tags, version, extra`) is the first metadata module work order to diverge from the established quartet in composition - resolved by treating "Follow existing metadata conventions" as dominant (keeping `correlation_id`) while treating "Suggested fields" as genuinely additive (adding `owner`/`tags`). See `factory/packages/036_PROJECT_FRAMEWORK.md`'s own Engineering Decision section for the full reasoning.
+
+### Known Limitations
+
+- **`Goal` does not exist as a domain object anywhere in this codebase** - the ownership chain `Project -> Goal -> Plan -> Task` has one implemented link (`Project`), one missing link (`Goal`), and two pre-existing links (`Plan`, `Task`).
+- **`owner`/`tags` are not settable through `ProjectBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `ProjectMetadata` construction.
+- **No transition logic on `ProjectStatus`.**
+- No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
