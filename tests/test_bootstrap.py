@@ -724,6 +724,7 @@ class BootstrapTests(unittest.TestCase):
         # ungated behavior against the real bootstrapped instance.
         from argus.intent import Intent, IntentType
         from argus.planner import Plan
+        from argus.trace import ExecutionTrace
 
         application = bootstrap()
 
@@ -732,9 +733,11 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(response_engine.status(), LifecycleState.CREATED)
 
             plan = Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
-            response = response_engine.build_response(plan)
+            execution_trace = ExecutionTrace()
+            response = response_engine.build_response(plan, execution_trace)
 
             self.assertIs(response.plan, plan)
+            self.assertIs(response.execution_trace, execution_trace)
             self.assertEqual(response.status, plan.status)
         finally:
             application.shutdown()
@@ -791,6 +794,10 @@ class BootstrapTests(unittest.TestCase):
                 self.assertIs(response.session, session)
                 self.assertEqual(response.response.plan.steps, ())
                 self.assertEqual(response.response.status, PlanStatus.CREATED)
+                self.assertEqual(
+                    [step.component for step in response.response.execution_trace.steps],
+                    ["AgentService", "CognitivePipeline", "ResponseEngine"],
+                )
                 self.assertEqual(
                     response.metadata["agent_session_id"], session.session_id
                 )

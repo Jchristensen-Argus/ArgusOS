@@ -8,6 +8,7 @@ from argus.conversation import ConversationSession
 from argus.intent import Intent, IntentType
 from argus.planner import Plan
 from argus.response import Response
+from argus.trace import TraceBuilder
 
 
 def _plan():
@@ -15,7 +16,8 @@ def _plan():
 
 
 def _response():
-    return Response(plan=_plan())
+    trace = TraceBuilder().with_step("AgentService", "entry").build()
+    return Response(plan=_plan(), execution_trace=trace)
 
 
 class DefaultsTests(unittest.TestCase):

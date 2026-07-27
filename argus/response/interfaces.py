@@ -3,7 +3,12 @@ Public interface contract for the ArgusOS Response Engine.
 
 Purpose:
     Define IResponseEngine, the contract other modules depend on, per
-    factory/packages/027_RESPONSE_ENGINE.md.
+    factory/packages/027_RESPONSE_ENGINE.md, as amended by
+    factory/packages/028_EXECUTION_TRACE.md's own explicit "Response
+    Integration" instruction: build_response() now also accepts the
+    finished ExecutionTrace for the request it is building a Response
+    for - "ResponseEngine shall not construct traces. It receives the
+    finished trace."
 
 Architectural Note - IResponseEngine Inherits IService, But No Method
 Is Gated:
@@ -69,7 +74,8 @@ Non-Responsibilities:
 
 Dependencies:
     argus.planner.plan (Plan), argus.response.response (Response),
-    argus.lifecycle.interfaces (IService).
+    argus.trace.trace (ExecutionTrace), argus.lifecycle.interfaces
+    (IService).
 """
 
 from abc import abstractmethod
@@ -77,6 +83,7 @@ from abc import abstractmethod
 from argus.lifecycle.interfaces import IService
 from argus.planner.plan import Plan
 from argus.response.response import Response
+from argus.trace.trace import ExecutionTrace
 
 
 class IResponseEngine(IService):
@@ -87,11 +94,17 @@ class IResponseEngine(IService):
     """
 
     @abstractmethod
-    def build_response(self, plan: Plan) -> Response:
-        """Accept a validated `plan`, validate the Plan reference, and
-        construct and return the resulting Response - a standardized,
-        non-AI, non-rendered snapshot of `plan` and its own planning
-        status. Performs no reasoning, planning, or execution itself -
-        see engine.py's own module docstring for the exact
-        construction sequence. Raises InvalidPlanReferenceError if
-        `plan` is not a Plan instance."""
+    def build_response(self, plan: Plan, execution_trace: ExecutionTrace) -> Response:
+        """Accept a validated `plan` and the finished `execution_trace`
+        recording how this request reached it, validate both
+        references, and construct and return the resulting Response -
+        a standardized, non-AI, non-rendered snapshot of `plan`, its
+        own planning status, and `execution_trace`. Performs no
+        reasoning, planning, or execution itself, and never
+        constructs or modifies the trace it is given - "ResponseEngine
+        shall not construct traces. It receives the finished trace"
+        (Package 028) - see engine.py's own module docstring for the
+        exact construction sequence. Raises InvalidPlanReferenceError
+        if `plan` is not a Plan instance, or
+        InvalidExecutionTraceError if `execution_trace` is not an
+        ExecutionTrace instance."""

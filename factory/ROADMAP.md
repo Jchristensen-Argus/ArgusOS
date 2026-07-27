@@ -36,6 +36,7 @@
 - [x] Cognitive Pipeline (CognitivePipeline, ICognitivePipeline, PipelineRequest, PipelineResult, Package 025 - first-generation orchestrator wiring Conversation -> Cognitive Context -> Planning Session -> Planner.plan_session(); twenty-second core service, twelfth IService adopter, no new events, no reasoning/planning behavior change)
 - [x] Agent Session (AgentSession, AgentRequest, AgentResponse, IAgentService, AgentService, Package 026 - first-generation user-facing orchestration layer wiring User -> Agent Session -> Cognitive Pipeline; twenty-third core service, thirteenth IService adopter, no new events, wraps PipelineResult only - no natural language, no execution)
 - [x] Response Engine (Response, ResponseMetadata, IResponseEngine, ResponseEngine, Package 027 - first-generation transformation layer converting a validated Plan into a standardized Response; twenty-fourth core service, fourteenth IService adopter (fifth zero-gated, first with no constructor dependency at all), no new events, no AI/formatting/rendering; AgentResponse amended to wrap Response instead of PipelineResult)
+- [x] Execution Trace (ExecutionTrace, TraceStep, TraceMetadata, ITraceBuilder, TraceBuilder, Package 028 - first-generation immutable record of how a request moved through Argus, built inside AgentService and embedded in Response.execution_trace; no new core service, no new events, no bootstrap changes - "TraceBuilder is not a service")
 
 ---
 

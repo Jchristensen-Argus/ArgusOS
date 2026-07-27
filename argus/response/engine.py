@@ -3,29 +3,49 @@ ResponseEngine: in-memory transformation for the ArgusOS Response
 Engine package.
 
 Purpose:
-    Implement IResponseEngine: convert a validated Plan into a
-    structured Response, per
-    factory/packages/027_RESPONSE_ENGINE.md. "The Response Engine
+    Implement IResponseEngine: convert a validated Plan and the
+    finished ExecutionTrace for its request into a structured
+    Response, per factory/packages/027_RESPONSE_ENGINE.md, as amended
+    by factory/packages/028_EXECUTION_TRACE.md. "The Response Engine
     converts a validated Plan into a structured response object. It
     does not generate AI text. It does not execute plans. It does not
     communicate with the user interface. Its responsibility is to
     transform cognitive output into a standardized response contract."
 
-Construction Sequence - build_response() Does Exactly Three Things:
+Package 028 Amendment - build_response() Also Receives The Finished
+ExecutionTrace:
+    "ResponseEngine shall not construct traces. It receives the
+    finished trace." `build_response()`'s own signature gains a second
+    parameter, `execution_trace: ExecutionTrace`, validated the same
+    way `plan` already was and embedded into the returned `Response`
+    unchanged. `ResponseEngine` never imports or calls
+    `argus.trace.builder.TraceBuilder` - only `AgentService` does (see
+    argus.agent.service's own module docstring) - so "ResponseEngine
+    may depend only on: Plan" is extended, not broken: the
+    `ExecutionTrace` it now also depends on is, like `Plan`, a
+    per-call argument, not a constructor-injected collaborator or a
+    service it calls into.
+
+Construction Sequence - build_response() Does Exactly Four Things:
     1. Validate the Plan reference (must be a Plan instance) -
        "Validate the Plan reference" (Responsibility 2). Raises
        InvalidPlanReferenceError otherwise.
-    2. Construct a Response - "Construct a Response" (Responsibility
+    2. Validate the ExecutionTrace reference (must be an ExecutionTrace
+       instance) - added by Package 028, mirroring step 1's own
+       validation shape. Raises InvalidExecutionTraceError otherwise.
+    3. Construct a Response - "Construct a Response" (Responsibility
        3). `status` is copied directly from `plan.status`; `metadata`
        is a fresh ResponseMetadata whose `extra` mapping is a plain
-       copy of `plan.metadata` (see "Metadata Propagation" below).
-    3. Return the Response - "Return the Response" (Responsibility 4).
+       copy of `plan.metadata` (see "Metadata Propagation" below);
+       `execution_trace` is embedded exactly as received, unmodified.
+    4. Return the Response - "Return the Response" (Responsibility 4).
 
     No AI, no formatting, no user interaction, no execution occurs
     anywhere in this sequence - `build_response()` never inspects
     `plan.steps`' own content beyond what `Response` itself already
-    holds by reference (the whole `Plan`), never renders anything, and
-    never calls any other service.
+    holds by reference (the whole `Plan`), never inspects
+    `execution_trace.steps`' own content either, never renders
+    anything, and never calls any other service.
 
 Dependency Boundary - Plan Only, Nothing Else, Not Even At
 Construction:
@@ -79,18 +99,24 @@ Non-Responsibilities:
 
 Dependencies:
     argus.planner.plan (Plan), argus.response.exceptions
-    (InvalidPlanReferenceError, ResponseError), argus.response.interfaces
-    (IResponseEngine), argus.response.metadata (ResponseMetadata),
-    argus.response.response (Response), argus.lifecycle.lifecycle
+    (InvalidExecutionTraceError, InvalidPlanReferenceError,
+    ResponseError), argus.response.interfaces (IResponseEngine),
+    argus.response.metadata (ResponseMetadata), argus.response.response
+    (Response), argus.trace.trace (ExecutionTrace), argus.lifecycle.lifecycle
     (LifecycleState).
 """
 
 from argus.lifecycle.lifecycle import LifecycleState
 from argus.planner.plan import Plan
-from argus.response.exceptions import InvalidPlanReferenceError, ResponseError
+from argus.response.exceptions import (
+    InvalidExecutionTraceError,
+    InvalidPlanReferenceError,
+    ResponseError,
+)
 from argus.response.interfaces import IResponseEngine
 from argus.response.metadata import ResponseMetadata
 from argus.response.response import Response
+from argus.trace.trace import ExecutionTrace
 
 
 class ResponseEngine(IResponseEngine):
@@ -104,9 +130,10 @@ class ResponseEngine(IResponseEngine):
         the full design rationale.
 
     Dependencies:
-        None. See the module docstring's "Dependency Boundary" note -
-        `Plan` is a per-call argument to build_response(), not a
-        constructor-injected collaborator.
+        None injected at construction. See the module docstring's
+        "Dependency Boundary" note - `Plan` and (as of Package 028)
+        `ExecutionTrace` are both per-call arguments to
+        build_response(), not constructor-injected collaborators.
     """
 
     def __init__(self) -> None:
@@ -144,14 +171,20 @@ class ResponseEngine(IResponseEngine):
 
     # -- IResponseEngine --------------------------------------------------
 
-    def build_response(self, plan: Plan) -> Response:
+    def build_response(self, plan: Plan, execution_trace: ExecutionTrace) -> Response:
         if not isinstance(plan, Plan):
             raise InvalidPlanReferenceError(
                 f"build_response() requires a Plan, got {plan!r}."
             )
+        if not isinstance(execution_trace, ExecutionTrace):
+            raise InvalidExecutionTraceError(
+                f"build_response() requires an ExecutionTrace, got "
+                f"{execution_trace!r}."
+            )
 
         return Response(
             plan=plan,
+            execution_trace=execution_trace,
             status=plan.status,
             metadata=ResponseMetadata(extra=dict(plan.metadata)),
         )

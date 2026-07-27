@@ -11,8 +11,9 @@ Responsibilities:
     - Provide a general response-subsystem error base (also used
       directly for IService lifecycle transition failures, mirroring
       PipelineError's (025) and AgentError's (026) identical role),
-      and a more specific subtype for "the Plan reference is invalid"
-      failures.
+      and more specific subtypes for "the Plan reference is invalid"
+      and - as of Package 028 - "the ExecutionTrace reference is
+      invalid" failures.
 
 Non-Responsibilities:
     - These exceptions carry no behavior beyond a message; they do
@@ -39,3 +40,11 @@ class InvalidPlanReferenceError(ResponseError):
     """Raised when build_response() is given something that is not a
     Plan instance - "Validate the Plan reference" (ResponseEngine
     Responsibility 2)."""
+
+
+class InvalidExecutionTraceError(ResponseError):
+    """Raised when build_response() is given something that is not an
+    ExecutionTrace instance. Added by Package 028 - "ResponseEngine
+    shall not construct traces. It receives the finished trace" -
+    build_response() validates the trace reference it receives the
+    same way it already validated the Plan reference."""

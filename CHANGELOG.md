@@ -1099,3 +1099,45 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `ResponseEngine.build_response()` is never gated - callers may invoke it at any lifecycle state, including before `initialize()`/`start()` are ever called.
 - No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
 - The Response Engine is not yet invoked by anything except `AgentService` - no other caller exists yet.
+
+## Package 028 - Execution Trace
+
+### Added
+
+- Added `argus/trace/` (`__init__.py`, `trace.py`, `step.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Execution Trace, an immutable record of how a request moved through Argus: `User -> Agent Service -> Execution Trace -> Pipeline -> Planner -> Response Engine -> Response`. "The Execution Trace is an immutable record of how a request moved through Argus. It is not logging. It is not debugging. It is not telemetry. It is a first-class architectural object."
+- `TraceStep` (`argus/trace/step.py`) - immutable, `component`, `action`, `step_id`, `timestamp`, `metadata`. "The trace records that a stage occurred, not its internal reasoning." `component`/`action` are open strings, not a closed enum - "Example component values," not an exhaustive list.
+- `TraceMetadata` (`argus/trace/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`'s shape and field names exactly (`created_at`, `version`, `correlation_id`, `extra`) - reverting to the `created_at` naming rather than repeating `ResponseMetadata`'s (Package 027) one-field `timestamp` deviation, per this package's own explicit field list.
+- `ExecutionTrace` (`argus/trace/trace.py`) - immutable, `trace_id`, `steps` (an ordered tuple of `TraceStep`), `metadata`. Every field defaults - `ExecutionTrace()` is always valid, representing an empty trace.
+- `TraceBuilder` / `ITraceBuilder` (`argus/trace/builder.py`, `argus/trace/interfaces.py`) - the one mutable object in this package. "The builder is the only mutable object." `with_step(component, action, metadata=...)` validates and appends a fresh, immutable `TraceStep` in call order; `with_metadata(key, value)` accumulates into the eventual `TraceMetadata.extra`, last-call-wins on repeated keys; `build()` returns an independent `ExecutionTrace` snapshot, callable more than once against the same builder without mutating an earlier snapshot. `trace_id` is fixed at construction, not regenerated per `build()` call, so repeated snapshots of the same builder share one identity. `ITraceBuilder` does not inherit `IService` - "TraceBuilder is not a service" - mirroring `ICognitiveContextBuilder`/`IPlanningSessionBuilder`'s own identical choice.
+- `TraceError`, `InvalidTraceStepError` (`argus/trace/exceptions.py`).
+- Added `factory/packages/028_EXECUTION_TRACE.md`.
+- Added `tests/test_trace_step.py` (12 new tests), `tests/test_trace_metadata.py` (10 new tests), `tests/test_trace.py` (13 new tests), `tests/test_trace_builder.py` (23 new tests) - covering defaults, immutability, empty/populated traces, builder accumulation, validation, and independent snapshots.
+
+### Changed
+
+- **`argus/response/response.py`** - `Response` gained a required `execution_trace: ExecutionTrace` field, per this package's own explicit "Response Integration" instruction ("Response now contains: response_id, plan, execution_trace, status, metadata"). Declared alongside `plan` ahead of the defaulted fields, per the established field-ordering-deviation precedent. A genuinely additive change to the schema, but breaking to direct `Response(...)` construction call sites, since `execution_trace` has no default.
+- **`argus/response/interfaces.py` / `argus/response/engine.py`** - `IResponseEngine.build_response()` / `ResponseEngine.build_response()` gained a second required parameter, `execution_trace: ExecutionTrace`, validated the same way `plan` already was and embedded into the returned `Response` unmodified. "ResponseEngine shall not construct traces. It receives the finished trace" - `ResponseEngine` never imports `TraceBuilder`.
+- **`argus/response/exceptions.py`** - added `InvalidExecutionTraceError`, raised when `build_response()`'s `execution_trace` argument is not an `ExecutionTrace` instance.
+- **`argus/agent/service.py`** - `run()` now creates a fresh `TraceBuilder` (constructed directly, not injected - see the "Engineering Decision" note below) at the start of every call and records three steps before calling `response_engine.build_response()`: `("AgentService", "entry")` before the Pipeline call, then `("CognitivePipeline", "completed")` and `("ResponseEngine", "invoked")` immediately before building the finished trace and calling the Response Engine. `AgentResponse` itself is unchanged - the trace now reaches callers exclusively via `AgentResponse.response.execution_trace`.
+- **`argus/agent/interfaces.py`** - `IAgentService.run()`'s own docstring updated to describe trace construction; no change to the abstract method's own signature.
+- **Engineering Decision**: this package's own Integration diagram lists "record Response completion" *after* invoking the Response Engine and lists "build ExecutionTrace" as the very last step - read with total literalness, this would mean the trace handed to `ResponseEngine` is not yet built at the moment it "receives" it, directly conflicting with this same package's own Dependency Rule, "ResponseEngine shall not construct traces. It receives the finished trace." The Dependency Rule (a "shall/shall not" constraint) took precedence over the diagram's own literal ordering (read, like every prior package's "Architectural Position" diagram, as a narrative summary rather than a line-by-line call sequence): the step the diagram calls "record Response completion" is recorded as `("ResponseEngine", "invoked")`, *before* `build_response()` is called, not after - an honest description of what has actually occurred at the moment it is recorded, keeping the trace genuinely finished and immutable when `ResponseEngine` receives it. See `argus/agent/service.py`'s own module docstring for the full reasoning.
+
+### Not Changed
+
+- **`argus/bootstrap.py` is completely unchanged** - "No new core services. TraceBuilder is not a service." Confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; `CORE_SERVICES_VERSION` remains `"0.2.7"`.
+- **`argus/planner/`, `argus/reasoning/`, `argus/decision/`, `argus/memory/`, `argus/memory_integration/`, `argus/knowledge/`, `argus/knowledge_graph/`, `argus/pipeline/` are all unchanged** - "Do not modify: Planner, Reasoning, Decision, Memory, Knowledge." "Runtime: No changes. Pipeline: No changes. Planner: No changes."
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes."
+- No logging, no telemetry, no metrics, no persistence - "The Execution Trace records flow, not cognition."
+
+### ADR Update
+
+- None. `TraceBuilder` is explicitly not a service ("TraceBuilder is not a service") and this package registers no new core service - the same "no ADR-0002 entry" precedent already set by Packages 022 (Cognitive Context) and 023 (Planning Session), the two prior infrastructure packages that likewise expanded no service registry.
+
+### Known Limitations
+
+- `TraceStep.component`/`.action` are open strings with no closed enum or validation beyond "non-empty string" - a caller could record `component="Bogus"` and nothing would reject it.
+- The Execution Trace records only three stages in Version 1 (`AgentService` entry, `CognitivePipeline` completion, `ResponseEngine` invocation) - it does not reach inside the Pipeline to record `Planner`/`Reasoning`/`Decision` sub-stages individually, per this package's own explicit "Do not modify: Planner, Reasoning, Decision" constraint.
+- The `("ResponseEngine", "invoked")` step is recorded before, not after, `build_response()` actually returns - see the "Engineering Decision" note above; the trace therefore never records whether the Response Engine call itself succeeded, only that it was about to be invoked with a fully-formed trace in hand.
+- No persistence, no querying, no visualization of traces - each `ExecutionTrace` lives only as long as the `Response` that holds it.
+- No AI, no optimization, no concurrency - unchanged from every prior package in this phase.
+
