@@ -17,20 +17,33 @@ Construction Sequence - execute() Does Exactly Four Things:
     2. Iterate through `plan.tasks`, in order - "iterate through
        ordered Tasks" (Responsibility 3) - using a fresh
        ExecutionResultBuilder. For each Task, as of Package 034, first
-       send it to `self._capability_executor.resolve(task)` - "Send
+       resolve it against CapabilityExecutor; as of Package 035, that
+       resolution is preceded by constructing one CapabilityContext
+       for the Task via a locally-constructed CapabilityContextBuilder
+       - "ExecutionEngine creates one CapabilityContext for each Task"
+       - carrying `task=task, plan=plan` (with `execution_trace` left
+       at its own None default - see
+       argus.capability_context.context's own module docstring for
+       why). That CapabilityContext, not the bare Task, is then sent
+       to `self._capability_executor.resolve(context)` - "CapabilityExecutor
+       now accepts CapabilityContext instead of a bare Task" - "Send
        Task to CapabilityExecutor. Receive CapabilityExecutionResult.
-       Ignore the returned status for now" - the returned
-       CapabilityExecutionResult is discarded immediately, not stored
-       anywhere, not inspected, not passed to anything else - then
-       call `with_completed_task(task)` exactly as before Package 034,
-       mirroring `AgentService.run()`'s own identical use of
+       Ignore the returned status for now" (034) still holds true of
+       the returned CapabilityExecutionResult, which continues to be
+       discarded immediately, not stored anywhere, not inspected, not
+       passed to anything else - then call `with_completed_task(task)`
+       exactly as before Packages 034/035, mirroring
+       `AgentService.run()`'s own identical use of
        `TraceBuilder.with_step()` once per stage (028). No tool is
        invoked, no Task is modified, and no business logic runs during
        this iteration - each Task is placed into `completed_tasks`
        exactly as received, and resolving it against the Capability
-       Registry (via CapabilityExecutor) changes nothing about that
-       outcome in Version 1 - "This package introduces dispatch only -
-       not execution policy."
+       Registry (via CapabilityExecutor, now via CapabilityContext)
+       changes nothing about that outcome in Version 1 - "This package
+       introduces dispatch only - not execution policy" (034),
+       unchanged by Package 035's own "No execution behavior... The
+       context is simply created and passed through the execution
+       pipeline."
     3. Set the builder's own status to ExecutionStatus.COMPLETED -
        "Set: ExecutionStatus.COMPLETED" - unconditionally, regardless
        of how many Tasks `plan.tasks` held (including zero - an empty
@@ -47,6 +60,29 @@ Construction Sequence - execute() Does Exactly Four Things:
     CapabilityExecutionStatus.NOT_FOUND - that outcome is deliberately
     ignored, per Package 034's own explicit "Ignore the returned
     status for now."
+
+Package 035 Amendment - One CapabilityContext Per Task, Built
+Locally, Not Injected:
+    "ExecutionEngine creates one CapabilityContext for each Task" - a
+    CapabilityContextBuilder is constructed fresh inside every
+    execute() call's own per-Task iteration (never stored as an
+    instance attribute, never constructor-injected), mirroring
+    `AgentService.run()`'s own established "construct TraceBuilder
+    directly inside every call, not injected" precedent (028). This
+    also follows directly from this codebase's own "no builder has
+    ever been registered as a bootstrap-level service" precedent
+    (confirmed by direct repository inspection - zero
+    `container.register(...)` calls for any `*Builder(` construction
+    exist anywhere in this codebase as of Package 035): since
+    CapabilityContextBuilder is not a service, ExecutionEngine cannot
+    receive one via constructor injection in the first place -
+    building it locally is the only available shape. `execution_trace`
+    is never set on the CapabilityContext this way (left at its own
+    None default) since no genuine ExecutionTrace object exists yet at
+    the point execute() runs - see
+    argus.capability_context.context's own module docstring for the
+    fuller reasoning and factory/packages/035_CAPABILITY_CONTEXT.md's
+    own Known Limitations section for the complete statement.
 
 Dependency Boundary - Plan Per-Call, CapabilityExecutor At
 Construction Only (Package 034 Amendment):
@@ -109,8 +145,13 @@ Dependencies:
     Package 034, constructor-injected and called once per Task,
     replacing Package 033's own stored-but-unused
     ICapabilityRegistry.
+    argus.capability_context.builder (CapabilityContextBuilder) -
+    Package 035, constructed locally once per Task inside execute(),
+    never constructor-injected (see the module docstring's "Package
+    035 Amendment" note).
 """
 
+from argus.capability_context.builder import CapabilityContextBuilder
 from argus.capability_executor.interfaces import ICapabilityExecutor
 from argus.execution_engine.builder import ExecutionResultBuilder
 from argus.execution_engine.exceptions import ExecutionError, InvalidPlanReferenceError
@@ -183,7 +224,10 @@ class ExecutionEngine(IExecutionEngine):
 
         builder = ExecutionResultBuilder().with_plan(plan)
         for task in plan.tasks:
-            self._capability_executor.resolve(task)
+            context = (
+                CapabilityContextBuilder().with_task(task).with_plan(plan).build()
+            )
+            self._capability_executor.resolve(context)
             builder.with_completed_task(task)
         builder.with_status(ExecutionStatus.COMPLETED)
 

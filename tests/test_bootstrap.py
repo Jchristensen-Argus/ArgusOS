@@ -773,7 +773,11 @@ class BootstrapTests(unittest.TestCase):
         # Confirms the end-to-end wiring against a real, bootstrap-
         # registered Capability - one of the five default workflow
         # capabilities population registers under
-        # "{IntentType.name.title()} Capability".
+        # "{IntentType.name.title()} Capability". As of Package 035,
+        # resolve() accepts a CapabilityContext, not a bare Task - see
+        # argus.capability_executor.executor's own module docstring's
+        # "Package 035 Amendment" note.
+        from argus.capability_context import CapabilityContextBuilder
         from argus.task import Task
 
         application = bootstrap()
@@ -783,7 +787,12 @@ class BootstrapTests(unittest.TestCase):
             capability_registry = application.container.resolve("capability_registry")
             existing_capability = capability_registry.list_capabilities()[0]
 
-            result = capability_executor.resolve(Task(name=existing_capability.name))
+            context = (
+                CapabilityContextBuilder()
+                .with_task(Task(name=existing_capability.name))
+                .build()
+            )
+            result = capability_executor.resolve(context)
 
             self.assertIs(result.capability, existing_capability)
         finally:
@@ -926,6 +935,7 @@ class BootstrapTests(unittest.TestCase):
                         "AgentService",
                         "CognitivePipeline",
                         "ExecutionEngine",
+                        "CapabilityContext",
                         "CapabilityExecutor",
                         "ResponseEngine",
                     ],

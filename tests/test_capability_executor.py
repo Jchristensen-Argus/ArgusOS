@@ -5,11 +5,13 @@ import logging
 import unittest
 
 from argus.capability import Capability, CapabilityRegistry, ICapabilityRegistry
+from argus.capability_context import CapabilityContext, CapabilityContextBuilder
 from argus.capability_executor import (
     CapabilityExecutionError,
     CapabilityExecutionStatus,
     CapabilityExecutor,
     ICapabilityExecutor,
+    InvalidCapabilityContextReferenceError,
     InvalidTaskReferenceError,
 )
 from argus.events import InMemoryEventBus
@@ -44,6 +46,14 @@ def _capability(**kwargs) -> Capability:
 
 def _executor(capability_registry=None) -> CapabilityExecutor:
     return CapabilityExecutor(capability_registry=capability_registry or _capability_registry())
+
+
+def _context(task: Task) -> CapabilityContext:
+    # As of Package 035, resolve() accepts a CapabilityContext, not a
+    # bare Task - see executor.py's own module docstring's "Package
+    # 035 Amendment" note. Every existing Package 034 test that used
+    # to pass a bare Task to resolve() now wraps it via this helper.
+    return CapabilityContextBuilder().with_task(task).build()
 
 
 # -- identity / IService ----------------------------------------------
@@ -144,14 +154,14 @@ class UngatedBehaviorTests(unittest.TestCase):
     def test_resolve_works_in_created_state(self):
         executor = _executor()
         self.assertEqual(executor.status(), LifecycleState.CREATED)
-        result = executor.resolve(Task(name="A"))
+        result = executor.resolve(_context(Task(name="A")))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
     def test_resolve_works_while_running(self):
         executor = _executor()
         executor.initialize()
         executor.start()
-        result = executor.resolve(Task(name="A"))
+        result = executor.resolve(_context(Task(name="A")))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
     def test_resolve_works_after_stopped(self):
@@ -159,7 +169,7 @@ class UngatedBehaviorTests(unittest.TestCase):
         executor.initialize()
         executor.start()
         executor.stop()
-        result = executor.resolve(Task(name="A"))
+        result = executor.resolve(_context(Task(name="A")))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
 
@@ -173,7 +183,7 @@ class ExactNameResolutionTests(unittest.TestCase):
         registry.register(capability)
         executor = CapabilityExecutor(capability_registry=registry)
 
-        result = executor.resolve(Task(name="Send Email"))
+        result = executor.resolve(_context(Task(name="Send Email")))
 
         self.assertEqual(result.status, CapabilityExecutionStatus.COMPLETED)
         self.assertIs(result.capability, capability)
@@ -183,7 +193,7 @@ class ExactNameResolutionTests(unittest.TestCase):
         registry.register(_capability(name="Send Email"))
         executor = CapabilityExecutor(capability_registry=registry)
 
-        result = executor.resolve(Task(name="Send Email To Bob"))
+        result = executor.resolve(_context(Task(name="Send Email To Bob")))
 
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
@@ -192,7 +202,7 @@ class ExactNameResolutionTests(unittest.TestCase):
         registry.register(_capability(name="Send Email"))
         executor = CapabilityExecutor(capability_registry=registry)
 
-        result = executor.resolve(Task(name="send email"))
+        result = executor.resolve(_context(Task(name="send email")))
 
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
@@ -202,7 +212,7 @@ class ExactNameResolutionTests(unittest.TestCase):
         executor = CapabilityExecutor(capability_registry=registry)
         task = Task(name="Send Email")
 
-        result = executor.resolve(task)
+        result = executor.resolve(_context(task))
 
         self.assertIs(result.task, task)
 
@@ -213,7 +223,7 @@ class ExactNameResolutionTests(unittest.TestCase):
 class NotFoundResolutionTests(unittest.TestCase):
     def test_empty_registry_returns_not_found(self):
         executor = _executor()
-        result = executor.resolve(Task(name="Anything"))
+        result = executor.resolve(_context(Task(name="Anything")))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
         self.assertIsNone(result.capability)
 
@@ -222,14 +232,14 @@ class NotFoundResolutionTests(unittest.TestCase):
         registry.register(_capability(name="Send Email"))
         executor = CapabilityExecutor(capability_registry=registry)
 
-        result = executor.resolve(Task(name="Send SMS"))
+        result = executor.resolve(_context(Task(name="Send SMS")))
 
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
         self.assertIsNone(result.capability)
 
     def test_empty_task_name_returns_not_found(self):
         executor = _executor()
-        result = executor.resolve(Task())
+        result = executor.resolve(_context(Task()))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
     def test_no_exception_is_raised_for_a_not_found_task(self):
@@ -238,7 +248,7 @@ class NotFoundResolutionTests(unittest.TestCase):
         # docstring.
         executor = _executor()
         try:
-            executor.resolve(Task(name="Anything"))
+            executor.resolve(_context(Task(name="Anything")))
         except Exception as error:  # pragma: no cover - failure path
             self.fail(f"resolve() raised unexpectedly: {error}")
 
@@ -258,7 +268,7 @@ class RegistryLookupTests(unittest.TestCase):
                 raise CapabilityNotFoundError(f"no capability named {name!r}")
 
         executor = CapabilityExecutor(capability_registry=_SpyRegistry())
-        executor.resolve(Task(name="Send Email"))
+        executor.resolve(_context(Task(name="Send Email")))
 
         self.assertEqual(calls, ["Send Email"])
 
@@ -279,28 +289,60 @@ class RegistryLookupTests(unittest.TestCase):
                 )
 
         executor = CapabilityExecutor(capability_registry=_ExplodingExceptGetByName())
-        result = executor.resolve(Task(name="Anything"))
+        result = executor.resolve(_context(Task(name="Anything")))
         self.assertEqual(result.status, CapabilityExecutionStatus.NOT_FOUND)
 
 
-# -- invalid Task ------------------------------------------------------------
+# -- invalid CapabilityContext (Package 035: new outer-parameter layer) ------
 
 
-class InvalidTaskTests(unittest.TestCase):
-    def test_non_task_argument_raises(self):
+class InvalidCapabilityContextTests(unittest.TestCase):
+    def test_non_context_argument_raises(self):
         executor = _executor()
-        with self.assertRaises(InvalidTaskReferenceError):
-            executor.resolve("not a task")
+        with self.assertRaises(InvalidCapabilityContextReferenceError):
+            executor.resolve("not a context")
 
     def test_none_argument_raises(self):
         executor = _executor()
-        with self.assertRaises(InvalidTaskReferenceError):
+        with self.assertRaises(InvalidCapabilityContextReferenceError):
             executor.resolve(None)
 
-    def test_dict_masquerading_as_task_raises(self):
+    def test_bare_task_argument_raises(self):
+        # As of Package 035, resolve() no longer accepts a bare Task
+        # directly - "CapabilityExecutor now accepts CapabilityContext
+        # instead of a bare Task." A Task that is not wrapped in a
+        # CapabilityContext must be rejected at this outer layer, not
+        # the inner one.
+        executor = _executor()
+        with self.assertRaises(InvalidCapabilityContextReferenceError):
+            executor.resolve(Task(name="Send Email"))
+
+    def test_dict_masquerading_as_context_raises(self):
+        executor = _executor()
+        with self.assertRaises(InvalidCapabilityContextReferenceError):
+            executor.resolve({"task": Task(name="Send Email")})
+
+
+# -- invalid Task (Package 035: now validated on context.task) --------------
+
+
+class InvalidTaskTests(unittest.TestCase):
+    def test_context_with_no_task_raises(self):
+        # CapabilityContext() defaults task=None - a context that was
+        # never given a Task cannot be resolved.
         executor = _executor()
         with self.assertRaises(InvalidTaskReferenceError):
-            executor.resolve({"name": "Send Email"})
+            executor.resolve(CapabilityContext())
+
+    def test_context_with_non_task_task_field_raises(self):
+        # A CapabilityContext constructed directly (bypassing the
+        # builder's own with_task() isinstance check) can still carry
+        # a malformed task field - resolve() must validate it itself,
+        # not merely trust the builder was used.
+        executor = _executor()
+        malformed_context = CapabilityContext(task="not a task")
+        with self.assertRaises(InvalidTaskReferenceError):
+            executor.resolve(malformed_context)
 
 
 # -- immutable result / no mutation of inputs ----------------------------
@@ -309,7 +351,7 @@ class InvalidTaskTests(unittest.TestCase):
 class ImmutableResultTests(unittest.TestCase):
     def test_result_cannot_be_mutated(self):
         executor = _executor()
-        result = executor.resolve(Task(name="A"))
+        result = executor.resolve(_context(Task(name="A")))
         with self.assertRaises(dataclasses.FrozenInstanceError):
             result.status = CapabilityExecutionStatus.COMPLETED
 
@@ -317,14 +359,21 @@ class ImmutableResultTests(unittest.TestCase):
         executor = _executor()
         task = Task(name="A")
         before = dataclasses.replace(task)
-        executor.resolve(task)
+        executor.resolve(_context(task))
         self.assertEqual(task, before)
 
-    def test_multiple_resolutions_of_the_same_task_produce_independent_results(self):
+    def test_context_is_never_mutated(self):
         executor = _executor()
-        task = Task(name="A")
-        first = executor.resolve(task)
-        second = executor.resolve(task)
+        context = _context(Task(name="A"))
+        before = dataclasses.replace(context)
+        executor.resolve(context)
+        self.assertEqual(context, before)
+
+    def test_multiple_resolutions_of_the_same_context_produce_independent_results(self):
+        executor = _executor()
+        context = _context(Task(name="A"))
+        first = executor.resolve(context)
+        second = executor.resolve(context)
         self.assertNotEqual(first.execution_id, second.execution_id)
         self.assertEqual(first.status, second.status)
 
@@ -338,7 +387,7 @@ class ImmutableResultTests(unittest.TestCase):
         registry.register(capability)
         executor = CapabilityExecutor(capability_registry=registry)
 
-        result = executor.resolve(Task(name="Send Email"))
+        result = executor.resolve(_context(Task(name="Send Email")))
 
         self.assertIs(result.capability, capability)
 

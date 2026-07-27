@@ -535,13 +535,14 @@ class TraceInvocationTests(unittest.TestCase):
                 "AgentService",
                 "CognitivePipeline",
                 "ExecutionEngine",
+                "CapabilityContext",
                 "CapabilityExecutor",
                 "ResponseEngine",
             ],
         )
         self.assertEqual(
             [step.action for step in trace.steps],
-            ["entry", "completed", "processed", "resolved", "invoked"],
+            ["entry", "completed", "processed", "created", "resolved", "invoked"],
         )
 
     def test_trace_is_embedded_unmodified_in_the_returned_response(self):
@@ -553,7 +554,7 @@ class TraceInvocationTests(unittest.TestCase):
         )
 
         self.assertIsInstance(agent_response.response.execution_trace, ExecutionTrace)
-        self.assertEqual(len(agent_response.response.execution_trace.steps), 5)
+        self.assertEqual(len(agent_response.response.execution_trace.steps), 6)
 
     def test_multiple_runs_produce_independent_traces(self):
         service = _started_service()

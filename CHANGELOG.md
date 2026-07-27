@@ -1374,3 +1374,40 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **`CapabilityExecutionStatus.RESOLVED`/`FAILED` are never produced by any Version 1 code path.**
 - **`ExecutionEngine` no longer holds any direct `ICapabilityRegistry` reference** - a deliberate consequence of the diagram's own single-chain shape.
 - No persistence, no concurrency, no scheduling - unchanged from every prior package in this phase.
+
+---
+
+## Package 035 - Capability Context
+
+### Added
+
+- Added `argus/capability_context/` (`__init__.py`, `context.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Capability Context. "A CapabilityContext represents all information available to a capability when it eventually performs work... The context is simply created and passed through the execution pipeline."
+- `CapabilityContext` (`argus/capability_context/context.py`) - immutable, `context_id`, `task`, `plan`, `execution_trace`, `metadata`. Every field defaults - `CapabilityContext()` is always valid - the same "value object with a dedicated builder" shape `CognitiveContext`/`PlanningSession`/`ExecutionTrace`/`Task`/`TaskRelationship`/`ExecutionResult`/`CapabilityExecutionResult` (022/023/028/029/031/032/034) all use. `task`/`plan`/`execution_trace` hold the actual objects directly, all defaulting to `None`. `execution_trace` is never populated by `ExecutionEngine` in Version 1 - a deliberate, documented consequence of construction-time ordering, not an oversight; see Engineering Decision in `factory/packages/035_CAPABILITY_CONTEXT.md`.
+- `CapabilityContextMetadata` (`argus/capability_context/metadata.py`) - immutable, mirrors every sibling metadata module's shape and field names exactly, per this package's own explicit "Follow existing metadata conventions" instruction.
+- `CapabilityContextBuilder` / `ICapabilityContextBuilder` (`argus/capability_context/builder.py`, `argus/capability_context/interfaces.py`) - "Builder is the only mutable object." `with_task()`/`with_plan()`/`with_execution_trace()` are singular, overwritten not accumulated; `with_metadata(key, value)` accumulates into `CapabilityContextMetadata.extra`; `build()` returns an independent snapshot. No `with_context_id()` - this package's own Responsibilities list does not name "assign id," matching `RelationshipBuilder`'s (031)/`ExecutionResultBuilder`'s (032)/`CapabilityExecutionResultBuilder`'s (034) own shape instead.
+- `CapabilityContextError`, `InvalidCapabilityContextError` (`argus/capability_context/exceptions.py`) - raised by the builder's own `with_*()` methods on malformed input. Named deliberately differently from the new `argus.capability_executor.exceptions.InvalidCapabilityContextReferenceError` (see below) to avoid the two being mistaken for the same exception across the package boundary.
+- Added `factory/packages/035_CAPABILITY_CONTEXT.md`.
+- Added `tests/test_capability_context.py`, `tests/test_capability_context_builder.py`, `tests/test_capability_context_metadata.py` - 53 new tests, entirely additive.
+
+### Changed
+
+- **`argus/capability_executor/executor.py`, `interfaces.py`, `exceptions.py`** - `CapabilityExecutor.resolve()`'s own Package 034 `task: Task` parameter is *replaced* by `context: CapabilityContext` - "CapabilityExecutor now accepts CapabilityContext instead of a bare Task." Resolution behavior is unchanged - the executor still resolves solely by `context.task.name`, still treats `CapabilityNotFoundError` as the normal `NOT_FOUND` outcome, still never invokes the found Capability. A new two-layer validation was added: `InvalidCapabilityContextReferenceError` (new) validates the outer `context` argument itself; `InvalidTaskReferenceError` (kept alive, not discarded) now validates the extracted `context.task` value instead of the former outer parameter.
+- **`argus/execution_engine/engine.py`** - `execute()` now constructs one `CapabilityContext` per Task, via a locally-constructed `CapabilityContextBuilder` (never constructor-injected, mirroring `AgentService.run()`'s own "construct `TraceBuilder` directly inside every call" precedent), carrying `task=task, plan=plan` (`execution_trace` left at its own `None` default). That context, not the bare Task, is sent to `capability_executor.resolve(context)`. `execute()`'s own returned `ExecutionResult` and `completed_tasks` placement are unchanged - "This package introduces... The context is simply created and passed through the execution pipeline," not new execution policy.
+- **`argus/execution_engine/interfaces.py`** - extended "Package 034 Amendment" Architectural Note to note the Package 035 call-site shape change without changing its own conclusion - `resolve()` remains exactly as zero-gated as before.
+- **`argus/agent/service.py`** - `AgentService.run()` gains one new trace step, `("CapabilityContext", "created")`, positioned between `("ExecutionEngine", "processed")` and `("CapabilityExecutor", "resolved")` - recorded honestly, after the fact, since context construction already happened inside `execution_engine.execute()` before that call returns. `AgentService` gains no new constructor dependency and `run()` gains no new interaction step - `CapabilityContext` is constructed by `ExecutionEngine`, not `AgentService`.
+- **`tests/test_capability_executor.py`** (+4 net, extensively rewritten to wrap every Task in a `CapabilityContext`), **`tests/test_execution_engine.py`** (+4, test doubles updated to accept `context`), **`tests/test_agent_service.py`** (trace-sequence assertions updated to six steps, no new tests), **`tests/test_bootstrap.py`** (one end-to-end test and one trace assertion updated, no new tests) - see Testing section of `factory/packages/035_CAPABILITY_CONTEXT.md` for the full breakdown.
+
+### Not Changed
+
+- **`argus/bootstrap.py` is unmodified.** `CapabilityContextBuilder` is not registered as a bootstrap-level service, per this package's own conditional Bootstrap instruction and this codebase's own "no builder has ever been registered as a service" precedent - confirmed by direct repository inspection before implementation began. Confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed.
+- **No changes to `Response`, `Planner`, `Runtime`, or `Events`.** Confirmed via `git diff --stat` showing zero lines changed in `argus/response/`, `argus/planner/`, `argus/planning/`, `argus/runtime/`, `argus/events/event_types.py`.
+- **No redesign of `CapabilityRegistry`, `CapabilityExecutionResult`, `CapabilityExecutionStatus`, or `CapabilityExecutionMetadata`** - `argus/capability/` and every `argus/capability_executor/` file other than `executor.py`/`interfaces.py`/`exceptions.py`/`__init__.py` are untouched by this package.
+- **No execution behavior, no AI, no tool invocation, no APIs** - "The context is simply created and passed through the execution pipeline."
+
+### Known Limitations
+
+- **`execution_trace` is always `None` on every `CapabilityContext` `ExecutionEngine` constructs in Version 1** - a deliberate, documented consequence of construction-time ordering, not an oversight.
+- **`CapabilityContext` never outlives the Task iteration that created it** - no caching, no reuse across Tasks, no persistence.
+- **Resolution behavior is unchanged from Package 034** - this package changes only how the Task reaches `CapabilityExecutor`, not what happens once it arrives.
+- **`CapabilityContextBuilder` is not a bootstrap-level service** - by design.
+- No persistence, no concurrency, no scheduling - unchanged from every prior package in this phase.

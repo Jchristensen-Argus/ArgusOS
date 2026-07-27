@@ -17,6 +17,7 @@ the execution contract only."
 from argus.capability_executor.builder import CapabilityExecutionResultBuilder
 from argus.capability_executor.exceptions import (
     CapabilityExecutionError,
+    InvalidCapabilityContextReferenceError,
     InvalidCapabilityExecutionResultError,
     InvalidTaskReferenceError,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "CapabilityExecutor",
     "ICapabilityExecutor",
     "CapabilityExecutionError",
+    "InvalidCapabilityContextReferenceError",
     "InvalidTaskReferenceError",
     "InvalidCapabilityExecutionResultError",
 ]

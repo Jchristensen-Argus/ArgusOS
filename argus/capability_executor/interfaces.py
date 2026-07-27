@@ -58,8 +58,23 @@ Non-Responsibilities:
     - This module defines no concrete behavior - see builder.py and
       executor.py.
 
+Package 035 Amendment - resolve() Now Accepts A CapabilityContext:
+    As of Package 035, resolve()'s own parameter changes from a bare
+    Task to a CapabilityContext - "CapabilityExecutor now accepts
+    CapabilityContext instead of a bare Task. Resolution behavior
+    remains unchanged - the executor still resolves solely by
+    context.task.name." This is a genuine, breaking signature change,
+    not an additive one - mirroring ExecutionEngine's own Package 034
+    "constructor-parameter replacement, not addition" precedent,
+    applied here to a method parameter instead. See executor.py's own
+    module docstring for the resulting two-layer validation design
+    (InvalidCapabilityContextReferenceError for the outer `context`
+    parameter, InvalidTaskReferenceError kept alive for the extracted
+    `context.task` value).
+
 Dependencies:
     argus.task.task (Task), argus.capability.capability (Capability),
+    argus.capability_context.context (CapabilityContext),
     argus.capability_executor.result (CapabilityExecutionResult),
     argus.capability_executor.status (CapabilityExecutionStatus),
     argus.lifecycle.interfaces (IService).
@@ -69,6 +84,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from argus.capability.capability import Capability
+from argus.capability_context.context import CapabilityContext
 from argus.capability_executor.result import CapabilityExecutionResult
 from argus.capability_executor.status import CapabilityExecutionStatus
 from argus.lifecycle.interfaces import IService
@@ -130,15 +146,19 @@ class ICapabilityExecutor(IService):
     """
 
     @abstractmethod
-    def resolve(self, task: Task) -> CapabilityExecutionResult:
-        """Accept and validate a `task` reference, and deterministically
-        resolve a Capability for it against the injected
-        CapabilityRegistry: if a Capability exists whose name exactly
-        matches `task.name`, return a CapabilityExecutionResult with
+    def resolve(self, context: CapabilityContext) -> CapabilityExecutionResult:
+        """Accept and validate a `context` reference (Package 035:
+        formerly a bare Task - see this module's own "Package 035
+        Amendment" note), and deterministically resolve a Capability
+        for `context.task` against the injected CapabilityRegistry: if
+        a Capability exists whose name exactly matches
+        `context.task.name`, return a CapabilityExecutionResult with
         that Capability and status=CapabilityExecutionStatus.COMPLETED;
         otherwise return one with capability=None and
         status=CapabilityExecutionStatus.NOT_FOUND. Never invokes the
-        found Capability, never modifies `task`, and performs no
-        business logic of any kind - "Only deterministic resolution."
-        Raises InvalidTaskReferenceError if `task` is not a Task
-        instance."""
+        found Capability, never modifies `context` or `context.task`,
+        and performs no business logic of any kind - "Only
+        deterministic resolution." Raises
+        InvalidCapabilityContextReferenceError if `context` is not a
+        CapabilityContext instance, or InvalidTaskReferenceError if
+        `context.task` is not a Task instance."""

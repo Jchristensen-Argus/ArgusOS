@@ -77,6 +77,14 @@ Used, But Still Nothing Is Gated:
     change, this dependency is genuinely called: `execute()` now sends
     every Task to `capability_executor.resolve(task)` before placing
     it into `completed_tasks` (see engine.py's own module docstring).
+    As of Package 035, that call site itself changes shape without
+    changing this conclusion - `execute()` now wraps each Task in a
+    locally-built CapabilityContext before calling
+    `capability_executor.resolve(context)` (a breaking signature
+    change on `resolve()` itself - see
+    argus/capability_executor/interfaces.py's own "Package 035
+    Amendment" note) - but `resolve()` remains exactly as zero-gated
+    as before, so this note's own conclusion is unchanged.
     This still does not change `execute()`'s own gating status:
     `resolve()` is itself a zero-gated ICapabilityExecutor method (see
     argus/capability_executor/interfaces.py's own Architectural Note),

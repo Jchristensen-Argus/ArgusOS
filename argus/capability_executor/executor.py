@@ -12,21 +12,44 @@ Purpose:
     plugins, no external tools, no API calls, no business logic - "It
     establishes the execution contract only."
 
-resolve() Does Exactly Two Things:
-    1. Validate the Task reference (must be a Task instance) - "accept
-       Task" (Responsibility 1). Raises InvalidTaskReferenceError
-       otherwise.
-    2. Look up `task.name` against the injected CapabilityRegistry via
-       `get_by_name()` (Package 033) - "resolve Capability"
-       (Responsibility 3). If a Capability is found, return a
-       CapabilityExecutionResult carrying it with
-       status=CapabilityExecutionStatus.COMPLETED. If
+resolve() Does Exactly Three Things (Package 035: A New First
+Validation Layer Was Added):
+    1. Validate the outer `context` reference (must be a
+       CapabilityContext instance) - Package 035's own new
+       requirement, since resolve() now "accepts CapabilityContext
+       instead of a bare Task." Raises
+       InvalidCapabilityContextReferenceError otherwise.
+    2. Validate the extracted `context.task` reference (must be a Task
+       instance) - "accept Task" (Responsibility 1), now checked one
+       level down. Raises InvalidTaskReferenceError otherwise. This is
+       the same InvalidTaskReferenceError Package 034 raised for the
+       (then bare) `task` parameter directly - kept genuinely alive by
+       moving what it validates, not left dormant after the signature
+       change (see this package's own two-layer validation design,
+       below).
+    3. Look up `context.task.name` against the injected
+       CapabilityRegistry via `get_by_name()` (Package 033) - "resolve
+       Capability" (Responsibility 3), unchanged from Package 034
+       except for reading the name through `context.task` rather than
+       `task` directly - "Resolution behavior remains unchanged - the
+       executor still resolves solely by context.task.name." If a
+       Capability is found, return a CapabilityExecutionResult
+       carrying it with status=CapabilityExecutionStatus.COMPLETED. If
        `CapabilityNotFoundError` is raised, that is treated as a
        normal resolution outcome, not an error to propagate - return a
        CapabilityExecutionResult with capability=None and
        status=CapabilityExecutionStatus.NOT_FOUND instead. "Only
        deterministic resolution" - no other CapabilityRegistry method
        is ever called, and the found Capability is never invoked.
+
+Two-Layer Validation Design (Package 035):
+    Rather than either discarding InvalidTaskReferenceError or
+    reusing it confusingly for the new outer-parameter check, this
+    package adds a new InvalidCapabilityContextReferenceError for
+    validating `context` itself, while keeping InvalidTaskReferenceError
+    genuinely alive and meaningful for validating the extracted
+    `context.task` value - both exceptions remain actively used, none
+    go dormant. See exceptions.py's own module docstring.
 
 Why COMPLETED, Not RESOLVED, On A Successful Match:
     This package's own explicit Resolution behavior reads literally:
@@ -87,9 +110,11 @@ Dependencies:
 
 from argus.capability.exceptions import CapabilityNotFoundError
 from argus.capability.interfaces import ICapabilityRegistry
+from argus.capability_context.context import CapabilityContext
 from argus.capability_executor.builder import CapabilityExecutionResultBuilder
 from argus.capability_executor.exceptions import (
     CapabilityExecutionError,
+    InvalidCapabilityContextReferenceError,
     InvalidTaskReferenceError,
 )
 from argus.capability_executor.interfaces import ICapabilityExecutor
@@ -154,10 +179,16 @@ class CapabilityExecutor(ICapabilityExecutor):
 
     # -- ICapabilityExecutor ---------------------------------------------
 
-    def resolve(self, task: Task) -> CapabilityExecutionResult:
+    def resolve(self, context: CapabilityContext) -> CapabilityExecutionResult:
+        if not isinstance(context, CapabilityContext):
+            raise InvalidCapabilityContextReferenceError(
+                f"resolve() requires a CapabilityContext, got {context!r}."
+            )
+
+        task = context.task
         if not isinstance(task, Task):
             raise InvalidTaskReferenceError(
-                f"resolve() requires a Task, got {task!r}."
+                f"resolve() requires context.task to be a Task, got {task!r}."
             )
 
         builder = CapabilityExecutionResultBuilder().with_task(task)

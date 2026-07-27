@@ -5,6 +5,7 @@ import logging
 import unittest
 
 from argus.capability import Capability, CapabilityRegistry, ICapabilityRegistry
+from argus.capability_context import CapabilityContext
 from argus.capability_executor import (
     CapabilityExecutionStatus,
     CapabilityExecutor,
@@ -93,11 +94,11 @@ class ConstructorInjectionTests(unittest.TestCase):
         calls = []
 
         class _RecordingExecutor:
-            def resolve(self, task):
-                calls.append(task)
+            def resolve(self, context):
+                calls.append(context.task)
                 from argus.capability_executor import CapabilityExecutionResult
 
-                return CapabilityExecutionResult(task=task)
+                return CapabilityExecutionResult(task=context.task)
 
         first = Task(name="A")
         second = Task(name="B")
@@ -111,14 +112,14 @@ class ConstructorInjectionTests(unittest.TestCase):
         # whose resolve() always reports NOT_FOUND still lets every
         # Task complete.
         class _AlwaysNotFoundExecutor:
-            def resolve(self, task):
+            def resolve(self, context):
                 from argus.capability_executor import (
                     CapabilityExecutionResult,
                     CapabilityExecutionStatus,
                 )
 
                 return CapabilityExecutionResult(
-                    task=task, status=CapabilityExecutionStatus.NOT_FOUND
+                    task=context.task, status=CapabilityExecutionStatus.NOT_FOUND
                 )
 
         engine = ExecutionEngine(capability_executor=_AlwaysNotFoundExecutor())
@@ -129,13 +130,92 @@ class ConstructorInjectionTests(unittest.TestCase):
 
     def test_empty_plan_never_calls_resolve(self):
         class _ExplodingExecutor:
-            def resolve(self, task):
+            def resolve(self, context):
                 raise AssertionError("resolve() must not be called for an empty Plan.")
 
         engine = ExecutionEngine(capability_executor=_ExplodingExecutor())
         result = engine.execute(_plan())
 
         self.assertEqual(result.status, ExecutionStatus.COMPLETED)
+
+    def test_execute_sends_a_capabilitycontext_not_a_bare_task(self):
+        # Package 035: "CapabilityExecutor now accepts
+        # CapabilityContext instead of a bare Task."
+        received = []
+
+        class _RecordingExecutor:
+            def resolve(self, context):
+                received.append(context)
+                from argus.capability_executor import CapabilityExecutionResult
+
+                return CapabilityExecutionResult(task=context.task)
+
+        task = Task(name="A")
+        plan = _plan(tasks=[task])
+        engine = ExecutionEngine(capability_executor=_RecordingExecutor())
+        engine.execute(plan)
+
+        self.assertEqual(len(received), 1)
+        self.assertIsInstance(received[0], CapabilityContext)
+
+    def test_execute_builds_one_context_per_task_carrying_that_task_and_the_plan(self):
+        # "ExecutionEngine creates one CapabilityContext for each
+        # Task" - carrying task=task, plan=plan.
+        received = []
+
+        class _RecordingExecutor:
+            def resolve(self, context):
+                received.append(context)
+                from argus.capability_executor import CapabilityExecutionResult
+
+                return CapabilityExecutionResult(task=context.task)
+
+        first = Task(name="A")
+        second = Task(name="B")
+        plan = _plan(tasks=[first, second])
+        engine = ExecutionEngine(capability_executor=_RecordingExecutor())
+        engine.execute(plan)
+
+        self.assertEqual(len(received), 2)
+        self.assertIs(received[0].task, first)
+        self.assertIs(received[0].plan, plan)
+        self.assertIs(received[1].task, second)
+        self.assertIs(received[1].plan, plan)
+
+    def test_execute_builds_a_fresh_context_per_task_not_a_shared_one(self):
+        received = []
+
+        class _RecordingExecutor:
+            def resolve(self, context):
+                received.append(context)
+                from argus.capability_executor import CapabilityExecutionResult
+
+                return CapabilityExecutionResult(task=context.task)
+
+        plan = _plan(tasks=[Task(name="A"), Task(name="B")])
+        engine = ExecutionEngine(capability_executor=_RecordingExecutor())
+        engine.execute(plan)
+
+        self.assertNotEqual(received[0].context_id, received[1].context_id)
+
+    def test_execute_leaves_execution_trace_as_none_on_every_context(self):
+        # See context.py's own module docstring's "execution_trace Is
+        # Always None In Version 1" note - no genuine ExecutionTrace
+        # exists yet at the point execute() runs.
+        received = []
+
+        class _RecordingExecutor:
+            def resolve(self, context):
+                received.append(context)
+                from argus.capability_executor import CapabilityExecutionResult
+
+                return CapabilityExecutionResult(task=context.task)
+
+        plan = _plan(tasks=[Task(name="A")])
+        engine = ExecutionEngine(capability_executor=_RecordingExecutor())
+        engine.execute(plan)
+
+        self.assertIsNone(received[0].execution_trace)
 
 
 # -- lifecycle ----------------------------------------------------------

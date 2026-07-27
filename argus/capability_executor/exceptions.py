@@ -11,10 +11,18 @@ Responsibilities:
     - CapabilityExecutionError: the base exception for this package
       (also used directly for IService lifecycle transition failures,
       mirroring ExecutionError's (032) identical role).
-    - InvalidTaskReferenceError: raised when resolve() is given
-      something that is not a Task instance - mirrors
-      InvalidPlanReferenceError's identical name and role in
-      argus.execution_engine.exceptions (032).
+    - InvalidCapabilityContextReferenceError: raised when resolve()
+      is given something that is not a CapabilityContext instance -
+      Package 035's own new outer-parameter check, added when
+      resolve()'s own signature changed from accepting a bare Task to
+      accepting a CapabilityContext (035).
+    - InvalidTaskReferenceError: raised when the CapabilityContext
+      given to resolve() carries a `task` field that is not a Task
+      instance - kept genuinely alive after Package 035's signature
+      change by moving from validating the outer parameter directly
+      (034) to validating the extracted `context.task` value (035),
+      per this package's own two-layer validation design (see
+      executor.py's own module docstring).
     - InvalidCapabilityExecutionResultError: raised by
       CapabilityExecutionResultBuilder's with_*() methods when given a
       malformed argument.
@@ -41,9 +49,18 @@ class CapabilityExecutionError(Exception):
     below, for example an invalid IService lifecycle transition."""
 
 
+class InvalidCapabilityContextReferenceError(CapabilityExecutionError):
+    """Raised when resolve() is given something that is not a
+    CapabilityContext instance - Package 035's new outer-parameter
+    check (see this module's own docstring)."""
+
+
 class InvalidTaskReferenceError(CapabilityExecutionError):
-    """Raised when resolve() is given something that is not a Task
-    instance - "accept Task" (CapabilityExecutor Responsibility 1)."""
+    """Raised when the CapabilityContext given to resolve() carries a
+    `task` field that is not a Task instance - "accept Task"
+    (CapabilityExecutor Responsibility 1), validated on the extracted
+    context.task value as of Package 035 (see this module's own
+    docstring)."""
 
 
 class InvalidCapabilityExecutionResultError(CapabilityExecutionError):
