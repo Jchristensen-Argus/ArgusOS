@@ -1212,3 +1212,42 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **No task graph, dependency ordering, or workflow relationship between Tasks exists** - `Plan.tasks`/`PlanningSession.tasks` are flat, ordered sequences with no notion of one Task depending on another.
 - **`clear_tasks()` has no counterpart on `goals`/`constraints`** - an intentional asymmetry, since this package's own work order names `clear_tasks()` explicitly and neither prior package's own work order asked for the equivalent on any other collection field.
 - No execution, no scheduling, no workflows, no tools, no persistence, no concurrency - unchanged from every prior package in this phase.
+
+## Package 031 - Task Relationships
+
+### Added
+
+- Added `argus/task_relationship/` (`__init__.py`, `relationship.py`, `relationship_type.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Task Relationships model, immutable and "purely descriptive." "Extend the Task domain so that Tasks can describe immutable relationships with other Tasks. This package does not implement scheduling, execution, or dependency resolution. It only introduces the relationship model."
+- `TaskRelationship` (`argus/task_relationship/relationship.py`) - immutable, `relationship_id`, `source_task`, `target_task`, `relationship_type`, `metadata`. Every field defaults - `TaskRelationship()` is always valid - the same "value object with a dedicated builder" shape `CognitiveContext`/`PlanningSession`/`ExecutionTrace`/`Task` (022/023/028/029) all use. `source_task`/`target_task` hold the actual `Task` objects directly (not reference strings) and both default to `None`, mirroring `PlanningSession.cognitive_context`'s own "optional object reference" precedent.
+- `RelationshipType` (`argus/task_relationship/relationship_type.py`) - a plain `Enum` (not a `str` subclass), four members: `PRECEDES`, `FOLLOWS`, `RELATED`, `BLOCKS`, mirroring `TaskStatus`/`PlanStatus`'s own shape. "Do not interpret them. Do not infer behavior." Defaults to `RELATED`, the most generic, non-directional member.
+- `RelationshipMetadata` (`argus/task_relationship/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`/`TaskMetadata`'s shape and field names exactly (`created_at`, `version`, `correlation_id`, `extra`), continuing the identical field-order-normalization precedent Packages 028 and 029 already applied to this same recurring tension.
+- `RelationshipBuilder` / `IRelationshipBuilder` (`argus/task_relationship/builder.py`, `argus/task_relationship/interfaces.py`) - the one mutable object in this package. `with_source_task(task)`/`with_target_task(task)` validate and overwrite (last call wins); `with_type(relationship_type)` validates and overwrites; `with_metadata(key, value)` accumulates into `RelationshipMetadata.extra`, last-call-wins; `build()` returns an independent `TaskRelationship` snapshot. `with_source_task()`/`with_target_task()` are included despite not being individually named in this package's own four-item Responsibilities list - the identical shape of gap Package 029 already resolved for `TaskBuilder.with_name()`/`with_description()`. `IRelationshipBuilder` does not inherit `IService`.
+- `TaskRelationshipError`, `InvalidTaskRelationshipError` (`argus/task_relationship/exceptions.py`).
+- Added `factory/packages/031_TASK_RELATIONSHIPS.md`.
+- Added `tests/test_task_relationship.py` (21 new tests), `tests/test_relationship_builder.py` (28 new tests), `tests/test_relationship_metadata.py` (10 new tests), `tests/test_relationship_type.py` (8 new tests) - 67 new tests, entirely additive.
+
+### Changed
+
+- **`argus/task/task.py`** - `Task` gained a new field, `relationships: Sequence[TaskRelationship]`, declared after `status` and before `metadata` - continuing Package 030's own "insert the new collection field before metadata" precedent exactly. Defaults to an empty tuple, ordered, immutable (wrapped via a newly-added `__post_init__` - `Task` had none before this package). Imports `TaskRelationship` only under `typing.TYPE_CHECKING` to avoid a genuine two-way package dependency with `argus.task_relationship` - see the Engineering Decision note below.
+- **`argus/task/builder.py`** - `TaskBuilder` gained three new methods: `with_relationship(relationship)` (validates and appends, rejecting a duplicate `relationship_id` against every `TaskRelationship` already accumulated - identity-based duplicate detection, the same policy Package 030 applied to `Plan.tasks`/`PlanningSession.tasks`), `with_relationships(relationships)` (delegates to `with_relationship()` once per item, in order), and `clear_relationships()` (resets the accumulated relationship list to empty). `build()` now passes `relationships=tuple(self._relationships)` to the `Task` constructor. Imports `TaskRelationship` directly (a real, runtime dependency, for `isinstance()` validation).
+- **`argus/task/interfaces.py`** - `ITaskBuilder` gained abstract `with_relationship`, `with_relationships`, `clear_relationships` methods matching the concrete `TaskBuilder`'s own new signatures.
+- **Engineering Decision**: `TaskRelationship` needs `Task` (for `source_task`/`target_task`), and `Task` now needs `TaskRelationship` (for its own `relationships` field) - a genuine two-way dependency at the package level. Resolved without restructuring either package: `argus/task/task.py` imports `TaskRelationship` only under `TYPE_CHECKING` (never evaluated at runtime), spelling the field's own annotation as a forward-reference string; only `argus/task/builder.py` (which needs the real class for runtime `isinstance()` checks) imports it directly. Not circular, since `argus.task.task` never imports `argus.task.builder`, and `argus.task_relationship.relationship` never imports `argus.task.builder` either - the "cycle" exists only in the type-annotation graph, never in the runtime import graph.
+
+### Not Changed
+
+- **`argus/bootstrap.py` is completely unchanged** - `TaskRelationship`/`RelationshipBuilder` are not `IService` implementations. Confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; `CORE_SERVICES_VERSION` remains `"0.3.0"`.
+- **`argus/planner/`, `argus/planning/`, `argus/agent/`, `argus/pipeline/`, `argus/response/`, `argus/trace/`, `argus/runtime/` are all unchanged** - "No Planner changes. No Plan changes. No Execution changes." Confirmed via `git diff --stat` showing zero lines changed in any of them.
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes."
+- No scheduling, no execution, no dependency graphs, no persistence - "Relationships describe work - they do not coordinate it."
+
+### ADR Update
+
+- None. `IRelationshipBuilder` does not inherit `IService` and this package registers no new core service - the same "no ADR-0002 entry" precedent already set by Packages 022, 023, 028, and 029.
+
+### Known Limitations
+
+- **`Task` performs no duplicate-`relationship_id` rejection of its own** - enforced only by `TaskBuilder.with_relationship()`, exactly like `Plan`'s own pre-existing, identical behavior toward duplicate `steps`/`tasks`.
+- **A `TaskRelationship` may reference the same `Task` as both its `source_task` and `target_task`** - not rejected, per "Do not interpret them. Do not infer behavior."
+- **No dependency graph, cycle detection, or ordering semantics exist anywhere** - `Task.relationships` is a flat, ordered sequence; a `PRECEDES` relationship carries no more actual consequence than a `RELATED` one.
+- **Nothing yet reads `Task.relationships` back out for any purpose** - no `Planner`, `Plan`, `AgentService`, `ResponseEngine`, or `ExecutionTrace` step references `TaskRelationship` in any way.
+- No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.

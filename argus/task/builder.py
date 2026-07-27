@@ -4,11 +4,32 @@ The TaskBuilder for the ArgusOS Task Model.
 Purpose:
     Provide a mutable, fluent way to assemble a Task's fields one at a
     time before producing a single immutable Task snapshot, per
-    factory/packages/029_TASK_MODEL.md. "Builder is the only mutable
-    object." Directly mirrors argus.context.builder.ContextBuilder
-    (022), argus.planning.builder.PlanningSessionBuilder (023), and
-    argus.trace.builder.TraceBuilder (028) - the same fluent-builder
-    pattern applied to the Task Model.
+    factory/packages/029_TASK_MODEL.md, as amended by
+    factory/packages/031_TASK_RELATIONSHIPS.md. "Builder is the only
+    mutable object." Directly mirrors argus.context.builder.
+    ContextBuilder (022), argus.planning.builder.PlanningSessionBuilder
+    (023), and argus.trace.builder.TraceBuilder (028) - the same
+    fluent-builder pattern applied to the Task Model.
+
+Package 031 Amendment - with_relationship()/with_relationships()/
+clear_relationships():
+    TaskBuilder gained three new methods, mirroring
+    PlanningSessionBuilder's own identically-shaped
+    with_task()/with_tasks()/clear_tasks() (Package 030) one layer
+    down: `with_relationship(relationship)` validates the argument is
+    a TaskRelationship, rejects a duplicate `relationship_id` against
+    every TaskRelationship already accumulated (identity-based
+    duplicate detection, the same policy Package 030 applied to
+    Plan.tasks/PlanningSession.tasks), then appends;
+    `with_relationships(relationships)` validates the argument is a
+    list or tuple, then delegates to `with_relationship()` once per
+    item, in order - not a parallel validation path, so duplicate
+    rejection (within the batch, and against anything already
+    accumulated) is inherited automatically; `clear_relationships()`
+    resets the accumulated relationship list to empty, mirroring
+    `clear_tasks()`'s own precedent as "the first 'reset a
+    collection' method any builder in this codebase has ever
+    exposed" for this particular field.
 
 Responsibilities Beyond The Work Order's Own Four-Item List:
     This package's own "Responsibilities" list for TaskBuilder names
@@ -72,7 +93,8 @@ Independent Snapshots:
 
 Responsibilities:
     - TaskBuilder: assign a Task's fields one at a time, with
-      per-field validation, and produce an immutable Task snapshot on
+      per-field validation, accumulate its ordered `relationships`
+      (Package 031), and produce an immutable Task snapshot on
       build().
 
 Non-Responsibilities:
@@ -85,16 +107,24 @@ Non-Responsibilities:
 Dependencies:
     argus.task.task (Task), argus.task.status (TaskStatus),
     argus.task.metadata (TaskMetadata), argus.task.exceptions
-    (InvalidTaskError), argus.task.interfaces (ITaskBuilder).
+    (InvalidTaskError), argus.task.interfaces (ITaskBuilder),
+    argus.task_relationship.relationship (TaskRelationship) - Package
+    031, for with_relationship()/with_relationships()'s own runtime
+    isinstance() validation. Not circular: argus.task.task never
+    imports argus.task_relationship.relationship at runtime (see
+    task.py's own "Avoiding A Circular Import" note), and
+    argus.task_relationship.relationship never imports
+    argus.task.builder.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Sequence
 
 from argus.task.exceptions import InvalidTaskError
 from argus.task.interfaces import ITaskBuilder
 from argus.task.metadata import TaskMetadata
 from argus.task.status import TaskStatus
 from argus.task.task import Task
+from argus.task_relationship.relationship import TaskRelationship
 
 
 def _require_non_empty_string(value: Any, *, label: str) -> str:
@@ -113,6 +143,7 @@ class TaskBuilder(ITaskBuilder):
         self._name: str = ""
         self._description: str = ""
         self._status: TaskStatus = TaskStatus.PENDING
+        self._relationships: List[TaskRelationship] = []
         self._metadata_extra: Dict[str, Any] = {}
 
     def with_name(self, name: str) -> "TaskBuilder":
@@ -135,6 +166,37 @@ class TaskBuilder(ITaskBuilder):
         self._status = status
         return self
 
+    def with_relationship(self, relationship: TaskRelationship) -> "TaskBuilder":
+        if not isinstance(relationship, TaskRelationship):
+            raise InvalidTaskError(
+                f"relationship must be a TaskRelationship instance, "
+                f"got {relationship!r}."
+            )
+        if any(
+            existing.relationship_id == relationship.relationship_id
+            for existing in self._relationships
+        ):
+            raise InvalidTaskError(
+                f"Duplicate relationship_id {relationship.relationship_id!r} - a "
+                f"TaskRelationship with this id has already been added."
+            )
+        self._relationships.append(relationship)
+        return self
+
+    def with_relationships(self, relationships: Sequence[TaskRelationship]) -> "TaskBuilder":
+        if not isinstance(relationships, (list, tuple)):
+            raise InvalidTaskError(
+                f"relationships must be a list or tuple of TaskRelationship "
+                f"instances, got {relationships!r}."
+            )
+        for relationship in relationships:
+            self.with_relationship(relationship)
+        return self
+
+    def clear_relationships(self) -> "TaskBuilder":
+        self._relationships = []
+        return self
+
     def with_metadata(self, key: str, value: Any) -> "TaskBuilder":
         validated_key = _require_non_empty_string(key, label="metadata key")
         self._metadata_extra[validated_key] = value
@@ -145,5 +207,6 @@ class TaskBuilder(ITaskBuilder):
             name=self._name,
             description=self._description,
             status=self._status,
+            relationships=tuple(self._relationships),
             metadata=TaskMetadata(extra=dict(self._metadata_extra)),
         )

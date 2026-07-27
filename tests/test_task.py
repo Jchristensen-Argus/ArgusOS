@@ -6,6 +6,7 @@ import pickle
 import unittest
 
 from argus.task import Task, TaskMetadata, TaskStatus
+from argus.task_relationship import RelationshipBuilder, TaskRelationship
 
 
 class DefaultsTests(unittest.TestCase):
@@ -43,13 +44,65 @@ class DefaultsTests(unittest.TestCase):
         self.assertIsNot(a.metadata, b.metadata)
 
 
+class RelationshipsTests(unittest.TestCase):
+    # "Extend the Task domain so that Tasks can describe immutable
+    # relationships with other Tasks." (Package 031)
+
+    def test_empty_relationships_by_default(self):
+        task = Task()
+        self.assertEqual(task.relationships, ())
+
+    def test_one_relationship(self):
+        relationship = TaskRelationship()
+        task = Task(relationships=[relationship])
+        self.assertEqual(task.relationships, (relationship,))
+
+    def test_many_relationships_preserve_insertion_order(self):
+        r1 = TaskRelationship()
+        r2 = TaskRelationship()
+        r3 = TaskRelationship()
+        task = Task(relationships=[r1, r2, r3])
+        self.assertEqual(task.relationships, (r1, r2, r3))
+
+    def test_relationships_is_a_tuple(self):
+        relationship = TaskRelationship()
+        task = Task(relationships=[relationship])
+        self.assertIsInstance(task.relationships, tuple)
+
+    def test_relationships_immutable_from_source_list(self):
+        r1 = TaskRelationship()
+        source = [r1]
+        task = Task(relationships=source)
+        source.append(TaskRelationship())
+        self.assertEqual(task.relationships, (r1,))
+
+    def test_relationships_tuple_cannot_be_mutated_in_place(self):
+        task = Task(relationships=[TaskRelationship()])
+        with self.assertRaises(AttributeError):
+            task.relationships.append(TaskRelationship())
+
+    def test_relationships_field_cannot_be_reassigned(self):
+        task = Task()
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            task.relationships = ()
+
+    def test_a_relationship_may_reference_this_task_itself(self):
+        # Not rejected at the Task level - see
+        # tests/test_task_relationship.py's own equivalent note.
+        task = Task(name="A")
+        relationship = RelationshipBuilder().with_source_task(task).build()
+        populated = Task(name="A", relationships=[relationship])
+        self.assertIs(populated.relationships[0].source_task, task)
+
+
 class NoExecutableLogicTests(unittest.TestCase):
-    def test_task_holds_no_field_beyond_identity_description_status_metadata(self):
+    def test_task_holds_no_field_beyond_identity_description_status_relationships_metadata(self):
         # "The task contains no executable logic. It is purely a
-        # value object."
+        # value object." Package 031 added `relationships`.
         field_names = {f.name for f in dataclasses.fields(Task)}
         self.assertEqual(
-            field_names, {"task_id", "name", "description", "status", "metadata"}
+            field_names,
+            {"task_id", "name", "description", "status", "relationships", "metadata"},
         )
 
     def test_task_defines_no_public_methods_beyond_dataclass_machinery(self):
@@ -79,6 +132,16 @@ class ImmutabilityTests(unittest.TestCase):
 
 
 class InvalidConstructionTests(unittest.TestCase):
+    def test_relationships_item_need_not_be_isinstance_checked_here(self):
+        # Like every other collection field in this codebase (Plan.steps,
+        # Plan.tasks/PlanningSession.tasks), Task performs no
+        # isinstance validation of its own items - see the module
+        # docstring's "No Validation Here" note. This is exercised
+        # directly by TaskBuilder.with_relationship()'s own validation
+        # instead - see tests/test_task_builder.py.
+        task = Task(relationships=["not a TaskRelationship"])  # type: ignore[list-item]
+        self.assertEqual(task.relationships, ("not a TaskRelationship",))
+
     def test_metadata_must_be_a_taskmetadata_not_a_bare_mapping(self):
         # Task performs no isinstance validation of its own (per
         # task.py's own "No Validation Here" note) - a bare dict is

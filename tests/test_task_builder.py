@@ -9,6 +9,7 @@ from argus.task import (
     TaskBuilder,
     TaskStatus,
 )
+from argus.task_relationship import RelationshipBuilder, TaskRelationship
 
 
 class IdentityTests(unittest.TestCase):
@@ -101,6 +102,118 @@ class WithStatusTests(unittest.TestCase):
             TaskBuilder().with_status(None)
 
 
+class WithRelationshipTests(unittest.TestCase):
+    def test_with_relationship_returns_self_for_chaining(self):
+        builder = TaskBuilder()
+        result = builder.with_relationship(TaskRelationship())
+        self.assertIs(result, builder)
+
+    def test_with_relationship_on_empty_builder_produces_single_relationship(self):
+        relationship = TaskRelationship()
+        task = TaskBuilder().with_relationship(relationship).build()
+        self.assertEqual(task.relationships, (relationship,))
+
+    def test_with_relationship_accumulates_preserving_insertion_order(self):
+        r1, r2, r3 = TaskRelationship(), TaskRelationship(), TaskRelationship()
+        task = (
+            TaskBuilder()
+            .with_relationship(r1)
+            .with_relationship(r2)
+            .with_relationship(r3)
+            .build()
+        )
+        self.assertEqual(task.relationships, (r1, r2, r3))
+
+    def test_with_relationship_rejects_non_taskrelationship(self):
+        with self.assertRaises(InvalidTaskError):
+            TaskBuilder().with_relationship("not a relationship")
+
+    def test_with_relationship_rejects_none(self):
+        with self.assertRaises(InvalidTaskError):
+            TaskBuilder().with_relationship(None)
+
+    def test_with_relationship_rejects_duplicate_relationship_id_same_object(self):
+        relationship = TaskRelationship()
+        builder = TaskBuilder().with_relationship(relationship)
+        with self.assertRaises(InvalidTaskError):
+            builder.with_relationship(relationship)
+
+    def test_with_relationship_rejects_duplicate_relationship_id_different_object(self):
+        relationship = TaskRelationship()
+        duplicate = TaskRelationship(relationship_id=relationship.relationship_id)
+        builder = TaskBuilder().with_relationship(relationship)
+        with self.assertRaises(InvalidTaskError):
+            builder.with_relationship(duplicate)
+
+
+class WithRelationshipsTests(unittest.TestCase):
+    def test_with_relationships_returns_self_for_chaining(self):
+        builder = TaskBuilder()
+        result = builder.with_relationships([TaskRelationship()])
+        self.assertIs(result, builder)
+
+    def test_with_relationships_adds_multiple_in_order(self):
+        r1, r2 = TaskRelationship(), TaskRelationship()
+        task = TaskBuilder().with_relationships([r1, r2]).build()
+        self.assertEqual(task.relationships, (r1, r2))
+
+    def test_with_relationships_combines_with_prior_with_relationship_calls(self):
+        r1, r2, r3 = TaskRelationship(), TaskRelationship(), TaskRelationship()
+        task = (
+            TaskBuilder().with_relationship(r1).with_relationships([r2, r3]).build()
+        )
+        self.assertEqual(task.relationships, (r1, r2, r3))
+
+    def test_with_relationships_accepts_tuple(self):
+        r1, r2 = TaskRelationship(), TaskRelationship()
+        task = TaskBuilder().with_relationships((r1, r2)).build()
+        self.assertEqual(task.relationships, (r1, r2))
+
+    def test_with_relationships_rejects_non_list_or_tuple(self):
+        with self.assertRaises(InvalidTaskError):
+            TaskBuilder().with_relationships("not a list")
+
+    def test_with_relationships_rejects_duplicate_within_the_batch(self):
+        r1 = TaskRelationship()
+        duplicate = TaskRelationship(relationship_id=r1.relationship_id)
+        with self.assertRaises(InvalidTaskError):
+            TaskBuilder().with_relationships([r1, duplicate])
+
+    def test_with_relationships_rejects_duplicate_against_prior_with_relationship_call(self):
+        r1 = TaskRelationship()
+        duplicate = TaskRelationship(relationship_id=r1.relationship_id)
+        builder = TaskBuilder().with_relationship(r1)
+        with self.assertRaises(InvalidTaskError):
+            builder.with_relationships([duplicate])
+
+
+class ClearRelationshipsTests(unittest.TestCase):
+    def test_clear_relationships_returns_self_for_chaining(self):
+        builder = TaskBuilder()
+        result = builder.clear_relationships()
+        self.assertIs(result, builder)
+
+    def test_clear_relationships_empties_previously_added_relationships(self):
+        task = (
+            TaskBuilder()
+            .with_relationship(TaskRelationship())
+            .clear_relationships()
+            .build()
+        )
+        self.assertEqual(task.relationships, ())
+
+    def test_clear_relationships_then_re_add_produces_only_new_relationships(self):
+        r1, r2 = TaskRelationship(), TaskRelationship()
+        task = (
+            TaskBuilder()
+            .with_relationship(r1)
+            .clear_relationships()
+            .with_relationship(r2)
+            .build()
+        )
+        self.assertEqual(task.relationships, (r2,))
+
+
 class WithMetadataTests(unittest.TestCase):
     def test_with_metadata_returns_self_for_chaining(self):
         builder = TaskBuilder()
@@ -147,17 +260,20 @@ class BuildTests(unittest.TestCase):
         self.assertNotEqual(a.task_id, b.task_id)
 
     def test_full_chain_produces_a_fully_populated_task(self):
+        relationship = RelationshipBuilder().build()
         task = (
             TaskBuilder()
             .with_name("Send email")
             .with_description("Send the welcome email")
             .with_status(TaskStatus.READY)
+            .with_relationship(relationship)
             .with_metadata("plan_id", "p-1")
             .build()
         )
         self.assertEqual(task.name, "Send email")
         self.assertEqual(task.description, "Send the welcome email")
         self.assertEqual(task.status, TaskStatus.READY)
+        self.assertEqual(task.relationships, (relationship,))
         self.assertEqual(dict(task.metadata.extra), {"plan_id": "p-1"})
 
 
