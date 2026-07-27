@@ -33,6 +33,7 @@ CORE_SERVICE_NAMES = (
     "agent_runtime",
     "connector_manager",
     "cognitive_pipeline",
+    "execution_engine",
     "response_engine",
     "agent_service",
 )

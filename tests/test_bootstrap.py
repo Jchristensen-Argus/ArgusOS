@@ -9,6 +9,7 @@ from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.agent import IAgentService, AgentService, AgentSession, AgentRequest
+from argus.execution_engine import ExecutionEngine, ExecutionStatus as EngineExecutionStatus, IExecutionEngine
 from argus.response import IResponseEngine, ResponseEngine
 from argus.pipeline import ICognitivePipeline, CognitivePipeline, PipelineRequest
 from argus.reasoning import IReasoningEngine, ReasoningEngine
@@ -50,6 +51,7 @@ CORE_SERVICE_NAMES = (
     "agent_runtime",
     "connector_manager",
     "cognitive_pipeline",
+    "execution_engine",
     "response_engine",
     "agent_service",
 )
@@ -690,6 +692,54 @@ class BootstrapTests(unittest.TestCase):
         finally:
             application.shutdown()
 
+    def test_bootstrap_registers_execution_engine_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("execution_engine"))
+            execution_engine = application.container.resolve("execution_engine")
+            self.assertIsInstance(execution_engine, IExecutionEngine)
+            self.assertIsInstance(execution_engine, ExecutionEngine)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_execution_engine_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            execution_engine = application.container.resolve("execution_engine")
+            self.assertEqual(execution_engine.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("execution_engine"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_execution_engine_executes_a_plan_even_while_unstarted(self):
+        # Like ResponseEngine's own build_response(), ExecutionEngine's
+        # execute() is never gated (see
+        # argus/execution_engine/interfaces.py's own Architectural
+        # Note) - this deliberately does NOT call
+        # initialize()/start() first, to directly demonstrate the
+        # ungated behavior against the real bootstrapped instance.
+        from argus.intent import Intent, IntentType
+        from argus.planner import Plan
+
+        application = bootstrap()
+
+        try:
+            execution_engine = application.container.resolve("execution_engine")
+            self.assertEqual(execution_engine.status(), LifecycleState.CREATED)
+
+            plan = Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
+            result = execution_engine.execute(plan)
+
+            self.assertIs(result.plan, plan)
+            self.assertEqual(result.status, EngineExecutionStatus.COMPLETED)
+        finally:
+            application.shutdown()
+
     def test_bootstrap_registers_response_engine_in_container(self):
         application = bootstrap()
 
@@ -722,6 +772,7 @@ class BootstrapTests(unittest.TestCase):
         # own end-to-end bootstrap tests, deliberately does NOT call
         # initialize()/start() first, to directly demonstrate the
         # ungated behavior against the real bootstrapped instance.
+        from argus.execution_engine import ExecutionResult
         from argus.intent import Intent, IntentType
         from argus.planner import Plan
         from argus.trace import ExecutionTrace
@@ -733,10 +784,12 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(response_engine.status(), LifecycleState.CREATED)
 
             plan = Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
+            execution_result = ExecutionResult(plan=plan)
             execution_trace = ExecutionTrace()
-            response = response_engine.build_response(plan, execution_trace)
+            response = response_engine.build_response(plan, execution_result, execution_trace)
 
             self.assertIs(response.plan, plan)
+            self.assertIs(response.execution_result, execution_result)
             self.assertIs(response.execution_trace, execution_trace)
             self.assertEqual(response.status, plan.status)
         finally:
@@ -796,7 +849,10 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(response.response.status, PlanStatus.CREATED)
                 self.assertEqual(
                     [step.component for step in response.response.execution_trace.steps],
-                    ["AgentService", "CognitivePipeline", "ResponseEngine"],
+                    ["AgentService", "CognitivePipeline", "ExecutionEngine", "ResponseEngine"],
+                )
+                self.assertEqual(
+                    response.response.execution_result.status, EngineExecutionStatus.COMPLETED
                 )
                 self.assertEqual(
                     response.metadata["agent_session_id"], session.session_id

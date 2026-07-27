@@ -19,6 +19,7 @@ Dependencies:
 
 from argus.response.engine import ResponseEngine
 from argus.response.exceptions import (
+    InvalidExecutionResultError,
     InvalidExecutionTraceError,
     InvalidPlanReferenceError,
     ResponseError,
@@ -34,5 +35,6 @@ __all__ = [
     "ResponseMetadata",
     "ResponseError",
     "InvalidPlanReferenceError",
+    "InvalidExecutionResultError",
     "InvalidExecutionTraceError",
 ]

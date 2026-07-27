@@ -5,6 +5,7 @@ import unittest
 
 from argus.agent import AgentResponse, AgentSession
 from argus.conversation import ConversationSession
+from argus.execution_engine import ExecutionResult
 from argus.intent import Intent, IntentType
 from argus.planner import Plan
 from argus.response import Response
@@ -16,8 +17,9 @@ def _plan():
 
 
 def _response():
+    plan = _plan()
     trace = TraceBuilder().with_step("AgentService", "entry").build()
-    return Response(plan=_plan(), execution_trace=trace)
+    return Response(plan=plan, execution_result=ExecutionResult(plan=plan), execution_trace=trace)
 
 
 class DefaultsTests(unittest.TestCase):

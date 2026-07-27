@@ -15,10 +15,12 @@ from argus.agent import (
 from argus.capability import CapabilityRegistry
 from argus.conversation import ConversationMessage, ConversationRole, ConversationSession
 from argus.events import InMemoryEventBus
+from argus.execution_engine import ExecutionEngine
+from argus.intent import Intent, IntentType
 from argus.lifecycle import IService
 from argus.lifecycle.lifecycle import LifecycleState
 from argus.pipeline import CognitivePipeline
-from argus.planner import Planner
+from argus.planner import Plan, Planner
 from argus.response import Response, ResponseEngine
 from argus.trace import ExecutionTrace
 
@@ -40,6 +42,10 @@ def _real_pipeline() -> CognitivePipeline:
     return pipeline
 
 
+def _stub_plan() -> Plan:
+    return Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
+
+
 class RecordingPipeline:
     """A test double recording exactly what run() was called with, so
     pipeline invocation can be verified without depending on
@@ -59,29 +65,60 @@ class RaisingPipeline:
         raise RuntimeError("synthetic pipeline failure for dependency-failure testing")
 
 
+class _StubPipelineResult:
+    """Minimal stand-in carrying just the one attribute
+    AgentService.run() actually reads off a PipelineResult: `plan`.
+    Defaults to a real Plan (rather than None) so that a real
+    ExecutionEngine.execute() call downstream still succeeds when no
+    override is supplied."""
+
+    def __init__(self, plan=None):
+        self.plan = plan if plan is not None else _stub_plan()
+
+
+class RecordingExecutionEngine:
+    """A test double recording exactly what execute() was called with
+    (Package 032), so Execution Engine invocation can be verified
+    without depending on ExecutionEngine's own internals."""
+
+    def __init__(self, result_to_return):
+        self.calls = []
+        self._result_to_return = result_to_return
+
+    def execute(self, plan):
+        self.calls.append(plan)
+        return self._result_to_return
+
+
+class RaisingExecutionEngine:
+    def execute(self, plan):
+        raise RuntimeError("synthetic execution engine failure for dependency-failure testing")
+
+
 class RecordingResponseEngine:
     """A test double recording exactly what build_response() was
-    called with (both the Plan and the ExecutionTrace - Package 028),
-    so Response Engine invocation can be verified without depending on
-    ResponseEngine's own internals."""
+    called with (the Plan, the ExecutionResult - Package 032 - and the
+    ExecutionTrace - Package 028), so Response Engine invocation can
+    be verified without depending on ResponseEngine's own internals."""
 
     def __init__(self, response_to_return):
         self.calls = []
         self._response_to_return = response_to_return
 
-    def build_response(self, plan, execution_trace):
-        self.calls.append((plan, execution_trace))
+    def build_response(self, plan, execution_result, execution_trace):
+        self.calls.append((plan, execution_result, execution_trace))
         return self._response_to_return
 
 
 class RaisingResponseEngine:
-    def build_response(self, plan, execution_trace):
+    def build_response(self, plan, execution_result, execution_trace):
         raise RuntimeError("synthetic response engine failure for dependency-failure testing")
 
 
-def _started_service(pipeline=None, response_engine=None) -> AgentService:
+def _started_service(pipeline=None, execution_engine=None, response_engine=None) -> AgentService:
     service = AgentService(
         cognitive_pipeline=pipeline or _real_pipeline(),
+        execution_engine=execution_engine or ExecutionEngine(),
         response_engine=response_engine or ResponseEngine(),
     )
     service.initialize()
@@ -96,16 +133,38 @@ class AgentServiceIdentityTests(unittest.TestCase):
     def test_is_an_iagentservice(self):
         from argus.agent import IAgentService
 
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         self.assertIsInstance(service, IAgentService)
 
     def test_is_an_iservice(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         self.assertIsInstance(service, IService)
 
     def test_starts_in_created_state(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         self.assertEqual(service.status(), LifecycleState.CREATED)
+
+    def test_constructor_takes_exactly_three_dependencies(self):
+        # Package 032: cognitive_pipeline, execution_engine (new),
+        # response_engine.
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
+        self.assertIsInstance(service, AgentService)
 
 
 # -- lifecycle ----------------------------------------------------------
@@ -113,29 +172,49 @@ class AgentServiceIdentityTests(unittest.TestCase):
 
 class AgentServiceLifecycleTests(unittest.TestCase):
     def test_initialize_transitions_to_initializing(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         service.initialize()
         self.assertEqual(service.status(), LifecycleState.INITIALIZING)
 
     def test_initialize_twice_raises(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         service.initialize()
         with self.assertRaises(AgentError):
             service.initialize()
 
     def test_start_requires_initializing(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         with self.assertRaises(AgentError):
             service.start()
 
     def test_start_transitions_to_running(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         service.initialize()
         service.start()
         self.assertEqual(service.status(), LifecycleState.RUNNING)
 
     def test_stop_requires_running(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         with self.assertRaises(AgentError):
             service.stop()
 
@@ -145,7 +224,11 @@ class AgentServiceLifecycleTests(unittest.TestCase):
         self.assertEqual(service.status(), LifecycleState.STOPPED)
 
     def test_status_reflects_current_state_throughout(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         self.assertEqual(service.status(), LifecycleState.CREATED)
         service.initialize()
         self.assertEqual(service.status(), LifecycleState.INITIALIZING)
@@ -164,7 +247,11 @@ class RunValidationTests(unittest.TestCase):
         return AgentRequest(session=session, conversation=session.conversation)
 
     def test_run_before_started_raises_agent_error(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        service = AgentService(
+            cognitive_pipeline=_real_pipeline(),
+            execution_engine=ExecutionEngine(),
+            response_engine=ResponseEngine(),
+        )
         with self.assertRaises(AgentError):
             service.run(self._request())
 
@@ -238,20 +325,13 @@ class PopulatedSessionTests(unittest.TestCase):
         # is verified via the Response's own successful construction
         # rather than message content, since Response (Package 027)
         # no longer holds the PipelineResult/ConversationSession at
-        # all, only the Plan.
+        # all, only the Plan (and, as of Package 032, the
+        # ExecutionResult).
         self.assertIsInstance(response.response, Response)
         self.assertEqual(response.response.plan.steps, ())
 
 
 # -- pipeline invocation ----------------------------------------------------
-
-
-class _StubPipelineResult:
-    """Minimal stand-in carrying just the one attribute
-    AgentService.run() actually reads off a PipelineResult: `plan`."""
-
-    def __init__(self, plan=None):
-        self.plan = plan
 
 
 class PipelineInvocationTests(unittest.TestCase):
@@ -286,6 +366,77 @@ class PipelineInvocationTests(unittest.TestCase):
         self.assertIsNot(recording.calls[0], recording.calls[1])
 
 
+# -- execution engine invocation (Package 032) --------------------------
+
+
+class ExecutionEngineInvocationTests(unittest.TestCase):
+    def test_execute_invoked_exactly_once(self):
+        recording = RecordingExecutionEngine(result_to_return=None)
+        service = _started_service(
+            execution_engine=recording, response_engine=RecordingResponseEngine(None)
+        )
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 1)
+
+    def test_execute_receives_the_pipeline_results_own_plan(self):
+        real_pipeline = _real_pipeline()
+        recording = RecordingExecutionEngine(result_to_return=None)
+        service = _started_service(
+            pipeline=real_pipeline,
+            execution_engine=recording,
+            response_engine=RecordingResponseEngine(None),
+        )
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 1)
+        self.assertEqual(recording.calls[0].steps, ())
+
+    def test_response_engine_receives_exactly_what_execution_engine_returned(self):
+        sentinel_result = object()
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(
+            execution_engine=RecordingExecutionEngine(result_to_return=sentinel_result),
+            response_engine=recording,
+        )
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 1)
+        self.assertIs(recording.calls[0][1], sentinel_result)
+
+    def test_multiple_runs_each_invoke_execution_engine_independently(self):
+        recording = RecordingExecutionEngine(result_to_return=None)
+        service = _started_service(
+            execution_engine=recording, response_engine=RecordingResponseEngine(None)
+        )
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 2)
+
+    def test_a_real_execution_engine_produces_a_completed_result(self):
+        service = _started_service()
+        session = AgentSession(conversation=ConversationSession())
+
+        agent_response = service.run(
+            AgentRequest(session=session, conversation=session.conversation)
+        )
+
+        from argus.execution_engine import ExecutionStatus
+
+        self.assertEqual(
+            agent_response.response.execution_result.status, ExecutionStatus.COMPLETED
+        )
+
+
 # -- agent integration: Response Engine invocation ---------------------------
 
 
@@ -309,9 +460,9 @@ class ResponseEngineInvocationTests(unittest.TestCase):
 
         # The Plan passed to build_response() must be a genuine Plan
         # produced by the real Cognitive Pipeline's own orchestration,
-        # proving the two delegate calls are wired in the correct
-        # order (pipeline.run() first, then response_engine.build_response()
-        # on its result).
+        # proving the delegate calls are wired in the correct order
+        # (pipeline.run() first, then execution_engine.execute() on
+        # its result, then response_engine.build_response() on both).
         self.assertEqual(len(recording.calls), 1)
         self.assertEqual(recording.calls[0][0].steps, ())
 
@@ -338,7 +489,7 @@ class ResponseEngineInvocationTests(unittest.TestCase):
         self.assertEqual(len(recording.calls), 2)
 
 
-# -- execution trace construction (Package 028) -----------------------------
+# -- execution trace construction (Package 028, amended by 032) -------------
 
 
 class TraceInvocationTests(unittest.TestCase):
@@ -350,24 +501,24 @@ class TraceInvocationTests(unittest.TestCase):
         service.run(AgentRequest(session=session, conversation=session.conversation))
 
         self.assertEqual(len(recording.calls), 1)
-        received_trace = recording.calls[0][1]
+        received_trace = recording.calls[0][2]
         self.assertIsInstance(received_trace, ExecutionTrace)
 
-    def test_trace_records_agent_service_cognitive_pipeline_and_response_engine(self):
+    def test_trace_records_agent_service_pipeline_execution_engine_and_response_engine(self):
         recording = RecordingResponseEngine(response_to_return=None)
         service = _started_service(response_engine=recording)
         session = AgentSession(conversation=ConversationSession())
 
         service.run(AgentRequest(session=session, conversation=session.conversation))
 
-        trace = recording.calls[0][1]
+        trace = recording.calls[0][2]
         self.assertEqual(
             [step.component for step in trace.steps],
-            ["AgentService", "CognitivePipeline", "ResponseEngine"],
+            ["AgentService", "CognitivePipeline", "ExecutionEngine", "ResponseEngine"],
         )
         self.assertEqual(
             [step.action for step in trace.steps],
-            ["entry", "completed", "invoked"],
+            ["entry", "completed", "processed", "invoked"],
         )
 
     def test_trace_is_embedded_unmodified_in_the_returned_response(self):
@@ -379,7 +530,7 @@ class TraceInvocationTests(unittest.TestCase):
         )
 
         self.assertIsInstance(agent_response.response.execution_trace, ExecutionTrace)
-        self.assertEqual(len(agent_response.response.execution_trace.steps), 3)
+        self.assertEqual(len(agent_response.response.execution_trace.steps), 4)
 
     def test_multiple_runs_produce_independent_traces(self):
         service = _started_service()
@@ -400,6 +551,17 @@ class TraceInvocationTests(unittest.TestCase):
         # the finished trace) is never reached, but this confirms the
         # failure path never raises anything trace-related itself.
         service = _started_service(pipeline=RaisingPipeline())
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+
+    def test_no_execution_engine_or_response_engine_trace_step_recorded_when_execution_engine_fails(self):
+        # RaisingExecutionEngine fails after "CognitivePipeline
+        # completed" is recorded but before "ExecutionEngine
+        # processed"/"ResponseEngine invoked" would ever be recorded -
+        # there is again no finished ExecutionTrace to inspect, since
+        # build_response() is never reached.
+        service = _started_service(execution_engine=RaisingExecutionEngine())
         session = AgentSession(conversation=ConversationSession())
         with self.assertRaises(AgentExecutionError):
             service.run(AgentRequest(session=session, conversation=session.conversation))
@@ -490,6 +652,19 @@ class DependencyFailureTests(unittest.TestCase):
         with self.assertRaises(AgentExecutionError):
             service.run(AgentRequest(session=session, conversation=session.conversation))
 
+    def test_execution_engine_failure_is_wrapped_as_agent_execution_error(self):
+        service = _started_service(execution_engine=RaisingExecutionEngine())
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError) as ctx:
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+        self.assertIsInstance(ctx.exception.__cause__, RuntimeError)
+
+    def test_no_response_returned_on_execution_engine_failure(self):
+        service = _started_service(execution_engine=RaisingExecutionEngine())
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+
     def test_response_engine_failure_is_wrapped_as_agent_execution_error(self):
         service = _started_service(response_engine=RaisingResponseEngine())
         session = AgentSession(conversation=ConversationSession())
@@ -503,9 +678,27 @@ class DependencyFailureTests(unittest.TestCase):
         with self.assertRaises(AgentExecutionError):
             service.run(AgentRequest(session=session, conversation=session.conversation))
 
+    def test_execution_engine_never_called_when_pipeline_fails_first(self):
+        recording = RecordingExecutionEngine(result_to_return=None)
+        service = _started_service(pipeline=RaisingPipeline(), execution_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+        self.assertEqual(len(recording.calls), 0)
+
     def test_response_engine_never_called_when_pipeline_fails_first(self):
         recording = RecordingResponseEngine(response_to_return=None)
         service = _started_service(pipeline=RaisingPipeline(), response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+        self.assertEqual(len(recording.calls), 0)
+
+    def test_response_engine_never_called_when_execution_engine_fails_first(self):
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(
+            execution_engine=RaisingExecutionEngine(), response_engine=recording
+        )
         session = AgentSession(conversation=ConversationSession())
         with self.assertRaises(AgentExecutionError):
             service.run(AgentRequest(session=session, conversation=session.conversation))

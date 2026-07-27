@@ -26,25 +26,44 @@ ExecutionTrace:
     per-call argument, not a constructor-injected collaborator or a
     service it calls into.
 
-Construction Sequence - build_response() Does Exactly Four Things:
+Package 032 Amendment - build_response() Also Receives The
+ExecutionResult:
+    "It receives ExecutionResult. It does not construct one."
+    `build_response()`'s own signature gains a third parameter,
+    `execution_result: ExecutionResult`, validated the same way `plan`
+    and `execution_trace` already were and embedded into the returned
+    `Response` unchanged. `ResponseEngine` never imports or calls
+    `argus.execution_engine.engine.ExecutionEngine` - only
+    `AgentService` does (see argus.agent.service's own module
+    docstring) - continuing the identical "per-call argument, not a
+    constructor-injected collaborator or a service it calls into"
+    shape already established for `execution_trace` (028).
+
+Construction Sequence - build_response() Does Exactly Five Things:
     1. Validate the Plan reference (must be a Plan instance) -
        "Validate the Plan reference" (Responsibility 2). Raises
        InvalidPlanReferenceError otherwise.
-    2. Validate the ExecutionTrace reference (must be an ExecutionTrace
+    2. Validate the ExecutionResult reference (must be an
+       ExecutionResult instance) - added by Package 032, mirroring
+       step 1's own validation shape. Raises
+       InvalidExecutionResultError otherwise.
+    3. Validate the ExecutionTrace reference (must be an ExecutionTrace
        instance) - added by Package 028, mirroring step 1's own
        validation shape. Raises InvalidExecutionTraceError otherwise.
-    3. Construct a Response - "Construct a Response" (Responsibility
+    4. Construct a Response - "Construct a Response" (Responsibility
        3). `status` is copied directly from `plan.status`; `metadata`
        is a fresh ResponseMetadata whose `extra` mapping is a plain
        copy of `plan.metadata` (see "Metadata Propagation" below);
-       `execution_trace` is embedded exactly as received, unmodified.
-    4. Return the Response - "Return the Response" (Responsibility 4).
+       `execution_result` and `execution_trace` are both embedded
+       exactly as received, unmodified.
+    5. Return the Response - "Return the Response" (Responsibility 4).
 
     No AI, no formatting, no user interaction, no execution occurs
     anywhere in this sequence - `build_response()` never inspects
     `plan.steps`' own content beyond what `Response` itself already
     holds by reference (the whole `Plan`), never inspects
-    `execution_trace.steps`' own content either, never renders
+    `execution_result.completed_tasks`'/`.failed_tasks`' own content
+    or `execution_trace.steps`' own content either, never renders
     anything, and never calls any other service.
 
 Dependency Boundary - Plan Only, Nothing Else, Not Even At
@@ -99,16 +118,19 @@ Non-Responsibilities:
 
 Dependencies:
     argus.planner.plan (Plan), argus.response.exceptions
-    (InvalidExecutionTraceError, InvalidPlanReferenceError,
-    ResponseError), argus.response.interfaces (IResponseEngine),
-    argus.response.metadata (ResponseMetadata), argus.response.response
-    (Response), argus.trace.trace (ExecutionTrace), argus.lifecycle.lifecycle
-    (LifecycleState).
+    (InvalidExecutionResultError, InvalidExecutionTraceError,
+    InvalidPlanReferenceError, ResponseError), argus.response.interfaces
+    (IResponseEngine), argus.response.metadata (ResponseMetadata),
+    argus.response.response (Response), argus.trace.trace
+    (ExecutionTrace), argus.execution_engine.result (ExecutionResult) -
+    Package 032, argus.lifecycle.lifecycle (LifecycleState).
 """
 
+from argus.execution_engine.result import ExecutionResult
 from argus.lifecycle.lifecycle import LifecycleState
 from argus.planner.plan import Plan
 from argus.response.exceptions import (
+    InvalidExecutionResultError,
     InvalidExecutionTraceError,
     InvalidPlanReferenceError,
     ResponseError,
@@ -171,10 +193,20 @@ class ResponseEngine(IResponseEngine):
 
     # -- IResponseEngine --------------------------------------------------
 
-    def build_response(self, plan: Plan, execution_trace: ExecutionTrace) -> Response:
+    def build_response(
+        self,
+        plan: Plan,
+        execution_result: ExecutionResult,
+        execution_trace: ExecutionTrace,
+    ) -> Response:
         if not isinstance(plan, Plan):
             raise InvalidPlanReferenceError(
                 f"build_response() requires a Plan, got {plan!r}."
+            )
+        if not isinstance(execution_result, ExecutionResult):
+            raise InvalidExecutionResultError(
+                f"build_response() requires an ExecutionResult, got "
+                f"{execution_result!r}."
             )
         if not isinstance(execution_trace, ExecutionTrace):
             raise InvalidExecutionTraceError(
@@ -184,6 +216,7 @@ class ResponseEngine(IResponseEngine):
 
         return Response(
             plan=plan,
+            execution_result=execution_result,
             execution_trace=execution_trace,
             status=plan.status,
             metadata=ResponseMetadata(extra=dict(plan.metadata)),

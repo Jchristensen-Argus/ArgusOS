@@ -5,17 +5,27 @@ package.
 Purpose:
     Implement IAgentService: accept an AgentRequest, build and record
     an ExecutionTrace as the request moves through the Cognitive
-    Pipeline and the Response Engine, and return the resulting
-    AgentResponse, wrapping the standardized Response - per
-    factory/packages/026_AGENT_SESSION.md, as amended by
-    factory/packages/027_RESPONSE_ENGINE.md's own explicit "Agent
-    Integration" instruction and factory/packages/028_EXECUTION_TRACE.md's
-    own explicit "Integration" instruction. "An Agent Session
-    represents an ongoing interaction between a user and Argus. It
-    owns conversation continuity. It orchestrates the Cognitive
-    Pipeline. It does not perform reasoning. It does not perform
-    planning. It does not perform execution." "The trace begins inside
-    AgentService."
+    Pipeline, the Execution Engine, and the Response Engine, and
+    return the resulting AgentResponse, wrapping the standardized
+    Response - per factory/packages/026_AGENT_SESSION.md, as amended
+    by factory/packages/027_RESPONSE_ENGINE.md's own explicit "Agent
+    Integration" instruction, factory/packages/028_EXECUTION_TRACE.md's
+    own explicit "Integration" instruction, and
+    factory/packages/032_EXECUTION_ENGINE.md's own explicit
+    "Integration" instruction. "An Agent Session represents an ongoing
+    interaction between a user and Argus. It owns conversation
+    continuity. It orchestrates the Cognitive Pipeline. It does not
+    perform reasoning. It does not perform planning. It does not
+    perform execution." "The trace begins inside AgentService." Note:
+    despite "It does not perform execution" - a Package 026 statement
+    describing the Cognitive Pipeline layer AgentService orchestrates
+    - AgentService (as of this package) does invoke the Execution
+    Engine; "execution" there refers to reasoning/planning/tool
+    execution, not the lifecycle-only bookkeeping ExecutionEngine
+    itself performs - see argus.execution_engine's own module
+    docstrings for why ExecutionEngine "does not invoke tools... does
+    not call APIs... does not invoke AI," and is not the kind of
+    "execution" that statement excludes.
 
 Package 027 Amendment - A Second Constructor Dependency, A Fifth
 Interaction Step:
@@ -47,6 +57,35 @@ ExecutionTrace:
     of its own to inject around) at the start of every call, and
     records three steps onto it before handing the finished,
     already-built `ExecutionTrace` to `response_engine.build_response()`.
+    (As of Package 032, one more step is recorded onto the same
+    builder between the second and third - see the "Package 032
+    Amendment" note below.)
+
+Package 032 Amendment - A Third Constructor Dependency, One More
+Interaction Step, One More Trace Step:
+    Per this package's own explicit "Integration" instruction: "New
+    flow: Pipeline -> Execution Engine -> Response Engine.
+    ExecutionResult is passed into ResponseEngine." `AgentService.
+    __init__()` now also accepts `execution_engine: IExecutionEngine`,
+    declared between `cognitive_pipeline` and `response_engine` to
+    mirror the flow's own ordering. `run()` gains one more step
+    between the prior Pipeline and Response Engine steps: after
+    `cognitive_pipeline.run()` completes, `execution_engine.execute
+    (pipeline_result.plan)` is invoked, producing the `ExecutionResult`
+    that `response_engine.build_response()` now also receives (see
+    "Interaction Sequence" below). One more ExecutionTrace step is
+    recorded to match - `("ExecutionEngine", "processed")` - per this
+    package's own explicit "Add one new trace step: ExecutionEngine,
+    action = processed." Unlike the `("ResponseEngine", "invoked")`
+    step (028's own Engineering Decision, recorded *before* invocation
+    since ResponseEngine is the last stage needing the finished
+    trace), `("ExecutionEngine", "processed")` is recorded *after*
+    `execute()` actually completes - "processed" is a completed-action
+    word, like "completed" for `CognitivePipeline`, not an
+    in-progress one like "invoked" - and nothing downstream of
+    `ExecutionEngine` needs the trace to already be finished at that
+    point, so there is no reason to record it early the way
+    `ResponseEngine`'s own step must be.
 
 Engineering Decision - Reconciling "record Response completion" With
 "ResponseEngine... receives the finished trace":
@@ -98,7 +137,7 @@ File Naming Deviates From The Work Order's Own Listed File Names:
     factory/packages/026_AGENT_SESSION.md for the full reasoning,
     unchanged by this package.
 
-Interaction Sequence - run() Does Exactly Seven Things:
+Interaction Sequence - run() Does Exactly Nine Things:
     1. Accept an AgentRequest (validated: must be an AgentRequest
        instance whose `session` is an AgentSession and whose
        `conversation` is a ConversationSession).
@@ -116,56 +155,71 @@ Interaction Sequence - run() Does Exactly Seven Things:
        original (`raise ... from error`) - no partial AgentResponse is
        ever returned, and no trace step is recorded for a Pipeline
        call that never completed.
-    5. Record two more steps onto the same builder - `("CognitivePipeline",
-       "completed")`, then `("ResponseEngine", "invoked")` - and call
-       `.build()` to produce the finished, immutable `ExecutionTrace`
-       - see the "Engineering Decision" note above for why the
-       "ResponseEngine" step is recorded here, before invocation.
-    6. Invoke `response_engine.build_response(pipeline_result.plan,
-       execution_trace)` - the second live service call, made with the
-       Plan the Cognitive Pipeline's own PipelineResult carries and the
-       just-finished ExecutionTrace. Any exception it raises is caught
-       and re-raised as AgentExecutionError the same way - "dependency
-       failures" (this package's own Testing category, amended by
-       Package 027) covers both this and step 4's own failure path
-       with the identical exception type, since both are "a component
+    5. Record one step onto the builder - `("CognitivePipeline",
+       "completed")`.
+    6. Invoke `execution_engine.execute(pipeline_result.plan)` - the
+       second live service call this method makes (Package 032). Any
+       exception it raises is caught and re-raised as
+       AgentExecutionError the same way step 4's failures are.
+    7. Record two more steps onto the same builder -
+       `("ExecutionEngine", "processed")`, then `("ResponseEngine",
+       "invoked")` - and call `.build()` to produce the finished,
+       immutable `ExecutionTrace` - see the "Engineering Decision" note
+       above for why the "ResponseEngine" step is recorded here,
+       before invocation, and the "Package 032 Amendment" note above
+       for why the "ExecutionEngine" step is instead recorded after
+       its own call completes.
+    8. Invoke `response_engine.build_response(pipeline_result.plan,
+       execution_result, execution_trace)` - the third live service
+       call, made with the Plan the Cognitive Pipeline's own
+       PipelineResult carries, the ExecutionResult the Execution
+       Engine just produced, and the just-finished ExecutionTrace. Any
+       exception it raises is caught and re-raised as
+       AgentExecutionError the same way - "dependency failures" (this
+       package's own Testing category, amended by Packages 027 and
+       032) covers this and steps 4 and 6's own failure paths with the
+       identical exception type, since all three are "a component
        AgentService delegates to raised during orchestration," per
        exceptions.py's own module docstring.
-    7. Return an AgentResponse assembled from `request.session` and
+    9. Return an AgentResponse assembled from `request.session` and
        the Response `response_engine.build_response()` returned
-       (itself now carrying the ExecutionTrace via
-       `Response.execution_trace`), plus propagated metadata.
+       (itself now carrying the ExecutionResult and ExecutionTrace via
+       `Response.execution_result`/`.execution_trace`), plus
+       propagated metadata.
 
     No new EventTypes are published anywhere in this sequence -
     "No event publication" - and every event either delegate's own
     orchestration produces still fires from inside
     `Planner.plan_session()`'s pre-existing delegated calls (Package
-    025); `ResponseEngine` itself publishes nothing at all (see
-    argus.response.engine's own module docstring), and `AgentService`
-    itself holds no `IEventBus` reference at all, the same "nothing of
-    its own to publish" shape `CognitivePipeline` (Package 025)
-    already established two layers below.
+    025); `ResponseEngine` and `ExecutionEngine` both publish nothing
+    at all (see argus.response.engine's and
+    argus.execution_engine.engine's own module docstrings), and
+    `AgentService` itself holds no `IEventBus` reference at all, the
+    same "nothing of its own to publish" shape `CognitivePipeline`
+    (Package 025) already established two layers below.
 
-Dependency Boundary - CognitivePipeline And ResponseEngine Only,
-Plus TraceBuilder:
+Dependency Boundary - CognitivePipeline, ExecutionEngine, And
+ResponseEngine Only, Plus TraceBuilder:
     Per Package 026's own explicit Dependency Rules, unchanged by
-    Package 027, `AgentService`'s constructor accepts exactly two
-    injected dependencies: an `ICognitivePipeline` and (as of Package
-    027) an `IResponseEngine`. It holds no reference to `IPlanner`,
+    Packages 027 and 032, `AgentService`'s constructor accepts exactly
+    three injected dependencies: an `ICognitivePipeline`, (as of
+    Package 032) an `IExecutionEngine`, and (as of Package 027) an
+    `IResponseEngine`. It holds no reference to `IPlanner`,
     `IReasoningEngine`, `IDecisionEngine`, or any bootstrap internal -
     "All cognition flows through the Pipeline" is still true by
     construction, not by restraint, since there is no live
     Planner/Reasoning/Decision service this class could call into even
-    if it wanted to; the Response Engine dependency is itself equally
-    restricted (per `ResponseEngine`'s own Dependency Rules) to
-    depending on nothing but the Plan and ExecutionTrace it is handed
-    per call. Package 028's own explicit Dependency Rules add exactly
-    one more permitted dependency - "AgentService may depend on:
-    TraceBuilder" - which `run()` constructs directly (not injected
-    via `__init__`, since a `TraceBuilder` is a short-lived, per-call
-    accumulator, not a long-lived collaborator; see argus.trace.
-    interfaces's own module docstring for why `TraceBuilder` is not a
-    service in the first place).
+    if it wanted to; both the Execution Engine and Response Engine
+    dependencies are themselves equally restricted (per each engine's
+    own Dependency Rules) to depending on nothing but the Plan (and,
+    for ResponseEngine, the ExecutionResult and ExecutionTrace) it is
+    handed per call. Package 028's own explicit Dependency Rules add
+    exactly one more permitted dependency - "AgentService may depend
+    on: TraceBuilder" - which `run()` constructs directly (not
+    injected via `__init__`, since a `TraceBuilder` is a short-lived,
+    per-call accumulator, not a long-lived collaborator; see argus.
+    trace.interfaces's own module docstring for why `TraceBuilder` is
+    not a service in the first place).
 
 Metadata Propagation:
     Unchanged in mechanism from Package 026: every key/value pair in
@@ -200,8 +254,9 @@ Responsibilities:
 Non-Responsibilities:
     - AgentService never implements reasoning, decision making,
       planning, or execution itself - it only calls
-      CognitivePipeline.run() and ResponseEngine.build_response(),
-      neither of which performs any of those either.
+      CognitivePipeline.run(), ExecutionEngine.execute(), and
+      ResponseEngine.build_response(), none of which performs any of
+      those either.
     - AgentService never modifies any object it is given or
       constructs - `AgentSession`, `AgentRequest`, `ConversationSession`,
       `PipelineResult`, `Response`, and `ExecutionTrace` are all
@@ -220,6 +275,7 @@ Dependencies:
     argus.agent (AgentRequest, AgentResponse, AgentSession,
     IAgentService, and the agent exceptions), argus.pipeline.interfaces
     (ICognitivePipeline), argus.pipeline.request (PipelineRequest),
+    argus.execution_engine.interfaces (IExecutionEngine) - Package 032,
     argus.response.interfaces (IResponseEngine), argus.trace.builder
     (TraceBuilder), argus.lifecycle.lifecycle (LifecycleState).
 """
@@ -236,6 +292,7 @@ from argus.agent.request import AgentRequest
 from argus.agent.response import AgentResponse
 from argus.agent.session import AgentSession
 from argus.conversation.session import ConversationSession
+from argus.execution_engine.interfaces import IExecutionEngine
 from argus.lifecycle.lifecycle import LifecycleState
 from argus.pipeline.interfaces import ICognitivePipeline
 from argus.pipeline.request import PipelineRequest
@@ -249,26 +306,32 @@ class AgentService(IAgentService):
 
     Purpose:
         Be the sole place ArgusOS turns an AgentRequest into an
-        AgentResponse by orchestrating the existing CognitivePipeline
-        and, as of Package 027, the Response Engine - as orchestration
-        only - no reasoning, no planning, no execution, no natural-
-        language response generation. See the module docstring for
-        the full design rationale.
+        AgentResponse by orchestrating the existing CognitivePipeline,
+        the Execution Engine (as of Package 032), and the Response
+        Engine (as of Package 027) - as orchestration only - no
+        reasoning, no planning, no execution, no natural-language
+        response generation. See the module docstring for the full
+        design rationale.
 
     Dependencies:
-        An ICognitivePipeline implementation and an IResponseEngine
-        implementation, both injected by the caller (bootstrap.py). No
-        other constructor dependency - see the module docstring's
-        "Dependency Boundary" note. Constructs a fresh TraceBuilder
-        directly inside every run() call - not injected, since
-        TraceBuilder is a short-lived, per-call accumulator, not a
-        long-lived collaborator.
+        An ICognitivePipeline implementation, an IExecutionEngine
+        implementation, and an IResponseEngine implementation, all
+        injected by the caller (bootstrap.py). No other constructor
+        dependency - see the module docstring's "Dependency Boundary"
+        note. Constructs a fresh TraceBuilder directly inside every
+        run() call - not injected, since TraceBuilder is a
+        short-lived, per-call accumulator, not a long-lived
+        collaborator.
     """
 
     def __init__(
-        self, cognitive_pipeline: ICognitivePipeline, response_engine: IResponseEngine
+        self,
+        cognitive_pipeline: ICognitivePipeline,
+        execution_engine: IExecutionEngine,
+        response_engine: IResponseEngine,
     ) -> None:
         self._cognitive_pipeline = cognitive_pipeline
+        self._execution_engine = execution_engine
         self._response_engine = response_engine
         self._state: LifecycleState = LifecycleState.CREATED
 
@@ -343,12 +406,22 @@ class AgentService(IAgentService):
             ) from error
 
         trace_builder.with_step("CognitivePipeline", "completed")
+
+        try:
+            execution_result = self._execution_engine.execute(pipeline_result.plan)
+        except Exception as error:
+            raise AgentExecutionError(
+                f"ExecutionEngine.execute() failed for "
+                f"agent_request_id={request.request_id!r}: {error}"
+            ) from error
+
+        trace_builder.with_step("ExecutionEngine", "processed")
         trace_builder.with_step("ResponseEngine", "invoked")
         execution_trace = trace_builder.build()
 
         try:
             response = self._response_engine.build_response(
-                pipeline_result.plan, execution_trace
+                pipeline_result.plan, execution_result, execution_trace
             )
         except Exception as error:
             raise AgentExecutionError(

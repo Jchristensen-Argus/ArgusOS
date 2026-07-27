@@ -1251,3 +1251,46 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **No dependency graph, cycle detection, or ordering semantics exist anywhere** - `Task.relationships` is a flat, ordered sequence; a `PRECEDES` relationship carries no more actual consequence than a `RELATED` one.
 - **Nothing yet reads `Task.relationships` back out for any purpose** - no `Planner`, `Plan`, `AgentService`, `ResponseEngine`, or `ExecutionTrace` step references `TaskRelationship` in any way.
 - No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.
+
+## Package 032 - Execution Engine
+
+### Added
+
+- Added `argus/execution_engine/` (`__init__.py`, `engine.py`, `result.py`, `status.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Execution Engine. "The Execution Engine accepts a Plan and produces an immutable ExecutionResult. It does not execute tools. It does not call APIs. It does not invoke AI. It simply establishes the execution lifecycle."
+- `ExecutionResult` (`argus/execution_engine/result.py`) - immutable, `execution_id`, `plan`, `completed_tasks`, `failed_tasks`, `status`, `metadata`. Every field defaults - `ExecutionResult()` is always valid - the same "value object with a dedicated builder" shape `CognitiveContext`/`PlanningSession`/`ExecutionTrace`/`Task`/`TaskRelationship` (022/023/028/029/031) all use. `plan` defaults to `None`, mirroring `PlanningSession.cognitive_context`/`TaskRelationship.source_task`'s own "optional object reference" precedent. `completed_tasks`/`failed_tasks` hold `Task` objects directly, in order; no duplicate-`task_id` rejection, unlike `Plan.tasks`/`Task.relationships` - a deliberate, literal reading of this package's own Requirements list.
+- `ExecutionStatus` (`argus/execution_engine/status.py`) - a plain `Enum` (not a `str` subclass), five members: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, mirroring `TaskStatus`/`PlanStatus`/`RelationshipType`'s own shape. "No transition logic." `execute()` always produces `COMPLETED` in Version 1.
+- `ExecutionMetadata` (`argus/execution_engine/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`/`TaskMetadata`/`RelationshipMetadata`'s shape and field names exactly (`created_at`, `version`, `correlation_id`, `extra`), continuing the identical field-order-normalization precedent Packages 028, 029, and 031 already applied.
+- `ExecutionResultBuilder` / `IExecutionResultBuilder` (`argus/execution_engine/builder.py`, `argus/execution_engine/interfaces.py`) - "Builder is the only mutable object." `with_plan(plan)` validates and overwrites; `with_completed_task(task)`/`with_failed_task(task)` validate and append (no duplicate rejection); `with_completed_tasks(tasks)`/`with_failed_tasks(tasks)` bulk-delegate; `clear_completed_tasks()`/`clear_failed_tasks()` reset; `with_status(status)` validates and overwrites; `with_metadata(key, value)` accumulates into `ExecutionMetadata.extra`; `build()` returns an independent `ExecutionResult` snapshot. The `completed_tasks`/`failed_tasks` method trios go beyond this package's own six-item Responsibilities list - the identical shape of gap Packages 029 and 031 already resolved for `TaskBuilder`/`RelationshipBuilder`.
+- `ExecutionEngine` / `IExecutionEngine` (`argus/execution_engine/engine.py`, `argus/execution_engine/interfaces.py`) - a new core service. `execute(plan)` validates the Plan, iterates `plan.tasks` in order placing each into `completed_tasks` via `ExecutionResultBuilder`, sets `status=ExecutionStatus.COMPLETED` unconditionally, and returns the built `ExecutionResult`. Takes no constructor dependency at all - the second core service in this codebase's own history, after `ResponseEngine` (027), with a fully empty constructor. `IExecutionEngine` inherits `IService`, but `execute()` is never gated on the `RUNNING` state - the sixth zero-gated adopter, the fifth divergent ADR-0002 case.
+- `ExecutionError`, `InvalidPlanReferenceError`, `InvalidExecutionResultError` (`argus/execution_engine/exceptions.py`).
+- Added `factory/packages/032_EXECUTION_ENGINE.md`.
+- Added `tests/test_execution_result.py`, `tests/test_execution_status.py`, `tests/test_execution_metadata.py`, `tests/test_execution_builder.py`, `tests/test_execution_engine.py` - 116 new tests, entirely additive.
+
+### Changed
+
+- **`argus/response/response.py`** - `Response` gained a new required field, `execution_result: ExecutionResult`, declared between `plan` and `execution_trace` - "required fields precede defaulted fields, in the work order's own listed relative order among just the required fields," the identical precedent Package 028 established for `execution_trace` itself.
+- **`argus/response/engine.py`** - `ResponseEngine.build_response()` gained a third parameter, `execution_result: ExecutionResult`, positioned between `plan` and `execution_trace`. Validated the same way `plan`/`execution_trace` already are, raising the newly added `InvalidExecutionResultError` otherwise, and embedded into the returned `Response` unmodified. "It receives ExecutionResult. It does not construct one."
+- **`argus/response/interfaces.py`, `argus/response/exceptions.py`, `argus/response/__init__.py`** - `IResponseEngine.build_response()`'s abstract signature, `InvalidExecutionResultError`, and the package's own public re-exports updated to match.
+- **`argus/agent/service.py`** - `AgentService.__init__()` gained a new constructor dependency, `execution_engine: IExecutionEngine`, declared between `cognitive_pipeline` and `response_engine`. `run()` gained one more step: after `cognitive_pipeline.run()` completes, `execution_engine.execute(pipeline_result.plan)` is invoked (exceptions wrapped as `AgentExecutionError`, matching the existing Pipeline/Response Engine failure paths), producing the `ExecutionResult` now also passed to `response_engine.build_response()`. One new `ExecutionTrace` step is recorded: `("ExecutionEngine", "processed")`, between the existing `("CognitivePipeline", "completed")` and `("ResponseEngine", "invoked")` steps - recorded *after* `execute()` completes (unlike the pre-invocation `("ResponseEngine", "invoked")` step), since "processed" is a completed-action word and nothing downstream needs the trace finished at that point.
+- **`argus/agent/interfaces.py`** - `IAgentService`'s module and `run()` docstrings updated to mention `ExecutionEngine.execute()`/`ExecutionResult`.
+- **`argus/bootstrap.py`** - constructs `execution_engine = ExecutionEngine()` and registers it as `"execution_engine"`, between `cognitive_pipeline` and `response_engine`. `AgentService`'s own construction gains `execution_engine=execution_engine`. `_register_core_services()` gains a matching `execution_engine: IExecutionEngine` parameter and `core_services` tuple entry - twenty-five core services now registered (up from twenty-four). `CORE_SERVICES_VERSION` remains `"0.3.1"`, not advanced by this package.
+- **`design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`** - appended an Empirical Finding for Package 032, recording `IExecutionEngine` as the sixth zero-gated `IService` adopter, the fifth divergent case, and the second empty-constructor core service - the first run of two consecutive divergent findings in this ADR's own history.
+
+### Not Changed
+
+- **`argus/planner/`, `argus/planning/`, `argus/pipeline/`, `argus/runtime/`, `argus/trace/`, `argus/task/`, `argus/task_relationship/` are all unchanged** - "Do not modify Planner, Plan, Pipeline, Runtime." Confirmed via `git diff --stat` showing zero lines changed in any of them.
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes."
+- No tool invocation, no API calls, no AI inference, no persistence, no concurrency - "It simply establishes the execution lifecycle."
+
+### ADR Update
+
+- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` gained a new Empirical Finding (Package 032) - see "Changed" above. ADR Status remains `Proposed`.
+
+### Known Limitations
+
+- **Every Task is considered successfully processed, unconditionally** - `failed_tasks` is never populated in Version 1; `ExecutionStatus.RUNNING`/`FAILED`/`CANCELLED` are never produced.
+- **No tool invocation, API call, or AI inference of any kind** - lifecycle bookkeeping only.
+- **`ExecutionResultBuilder` performs no duplicate-`task_id` rejection** - a deliberate, literal reading of this package's own Requirements list, unlike `Plan.tasks`'s/`Task.relationships`'s own builder-level rejection.
+- **No dependency graph, ordering, or scheduling consequence exists** - a `TaskRelationship` (031) carries no execution consequence in Version 1.
+- **`ExecutionEngine.execute()` is never gated on the service's own lifecycle state** - mirroring `ResponseEngine.build_response()`'s own identical Version 1 shape.
+- No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.

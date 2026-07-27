@@ -1192,3 +1192,79 @@ new package's own combination as a fresh, independent surprise. This
 ADR's Status remains `Proposed`, per standing instruction; only the
 Founder/Architect elevates it to `Accepted`, revises its text, or
 opens the follow-up package.
+
+---
+
+## Empirical Finding (Package 032 - Execution Engine)
+
+`IExecutionEngine`, per the Founder's Package 032 work order, DOES
+inherit `IService` - read the same way "Register: ResponseEngine"
+(027) was: this package's own Bootstrap section says only "Register:
+ExecutionEngine. One new core service," with no further elaboration,
+but "core service" remains this codebase's own established shorthand
+for "adopts IService" (see argus/response/interfaces.py's own
+identical Architectural Note, and every prior directed-adoption
+finding in this file). Applying ADR-0002's criterion to `execute()`
+independently, however, would NOT have suggested adoption on its own
+- the identical divergence Packages 018, 020, 021, and 027 each
+exhibited. `execute()` is a synchronous, in-memory transformation of a
+`Plan` the caller already supplies - no external call, no dispatch to
+another live service, and no phase distinction it could plausibly be
+gated on, since `ExecutionEngine`'s own constructor takes no
+dependency at all (see engine.py's own module docstring). This is
+architecturally the identical shape to `ResponseEngine` (027) - "no
+live collaborator to gate access to in the first place" - making
+`IExecutionEngine` the **sixth** IService adopter in this codebase
+with zero gated methods (after IntentRouter, KnowledgeGraph,
+ReasoningEngine, DecisionEngine, and ResponseEngine), and the
+**fifth** case where an explicit instruction to adopt IService
+diverges from what ADR-0002's own criterion would independently
+conclude (after Packages 018, 020, 021, and 027).
+
+This finding extends the divergent/convergent split Package 027's own
+finding tipped away from parity: five divergent (018, 020, 021, 027,
+032) against three convergent (019, 025, 026) across eight directed-
+adoption data points. Read as a single sequence, the pattern so far is
+018-divergent, 019-convergent, 020-divergent, 021-divergent,
+025-convergent, 026-convergent, 027-divergent, 032-divergent - the
+first run of two consecutive divergent findings this ADR's own history
+has produced. This is still not enough evidence to claim divergence is
+"typical" outright, but it is the first data point that mildly
+favors that reading over the near-parity every prior finding had
+maintained.
+
+A related, narrower point specific to this package, extending
+Package 027's own "first empty constructor" observation:
+`ExecutionEngine` is only the **second** core service in this
+codebase's own history - after `ResponseEngine` (027) - with a fully
+empty constructor. Its own sole "dependency," the `Plan` it processes,
+is a per-call argument to `execute()`, never a constructor-injected
+collaborator, for the identical reason `ResponseEngine`'s own `Plan`
+dependency is per-call rather than constructor-injected. This remains
+a dependency-shape observation, not an adoption-criterion question,
+recorded here only because it was discovered in the course of this
+same package's IService integration work.
+
+Fifteen adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, DecisionEngine,
+CognitivePipeline, AgentService, ResponseEngine, and now
+ExecutionEngine), nine of which are genuinely gated (all but
+IntentRouter, KnowledgeGraph, ReasoningEngine, DecisionEngine,
+ResponseEngine, and now ExecutionEngine). Ten core services exist that
+do not implement `IService` at all (Configuration, the Logger, the
+Event Bus, the Service Registry, the Lifecycle Manager, Knowledge
+Service, Memory Service, Capability Registry, Plugin Manager, and
+Planner) - unchanged by this package.
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for fifteen adopters rather than fourteen. This
+package's finding, producing this ADR's own first run of two
+consecutive divergent findings, makes the case for formally separating
+"adoption" from "gating" as distinct questions somewhat stronger still
+- eight directed-adoption data points, five divergent and three
+convergent, with divergence now trending rather than merely tied. This
+ADR's Status remains `Proposed`, per standing instruction; only the
+Founder/Architect elevates it to `Accepted`, revises its text, or
+opens the follow-up package.

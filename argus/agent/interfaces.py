@@ -7,15 +7,21 @@ Purpose:
     factory/packages/027_RESPONSE_ENGINE.md's own explicit "Agent
     Integration" instruction (run() now also invokes
     ResponseEngine.build_response(); AgentResponse now wraps a
-    Response instead of a PipelineResult) and
+    Response instead of a PipelineResult),
     factory/packages/028_EXECUTION_TRACE.md's own explicit
     "Integration" instruction (run() now also builds and records an
     ExecutionTrace as the request moves through the Cognitive Pipeline
-    and the Response Engine - see response.py's and service.py's own
-    module docstrings for the full amendment). This abstract method's
-    own signature is unchanged by Package 028 - it still accepts an
+    and the Response Engine), and
+    factory/packages/032_EXECUTION_ENGINE.md's own explicit
+    "Integration" instruction (run() now also invokes
+    ExecutionEngine.execute() between the Cognitive Pipeline and the
+    Response Engine stages, and records one more ExecutionTrace step
+    for it - see response.py's and service.py's own module docstrings
+    for the full amendment). This abstract method's own signature is
+    unchanged by Packages 028 or 032 - it still accepts an
     AgentRequest and returns an AgentResponse - the trace is built and
-    recorded entirely inside the implementation.
+    recorded, and the Execution Engine invoked, entirely inside the
+    implementation.
 
 Architectural Note - Why IAgentService DOES Inherit IService:
     "Register AgentService as the next core service" is the direct
@@ -80,21 +86,23 @@ class IAgentService(IService):
     @abstractmethod
     def run(self, request: AgentRequest) -> AgentResponse:
         """Accept `request`, invoke CognitivePipeline.run() with a
-        PipelineRequest built from it, build and record an
-        ExecutionTrace across the Cognitive Pipeline and Response
-        Engine stages (Package 028), invoke
-        ResponseEngine.build_response() with the resulting Plan and
-        the finished ExecutionTrace, and return the resulting
-        AgentResponse, wrapping the standardized Response unmodified
-        (Package 027's own "Agent Integration" amendment to Package
-        026's original PipelineResult-wrapping behavior). Performs no
-        reasoning, decision making, planning, or execution itself -
-        see service.py's own module docstring for the exact
-        orchestration sequence. Raises InvalidAgentRequestError if
-        `request` is not an AgentRequest instance, its `session` field
-        is not an AgentSession instance, or its `conversation` field
-        is not a ConversationSession instance. Raises
-        AgentExecutionError, wrapping the underlying exception, if the
-        delegated CognitivePipeline.run() call or the delegated
+        PipelineRequest built from it, invoke ExecutionEngine.execute()
+        with the resulting Plan (Package 032), build and record an
+        ExecutionTrace across the Cognitive Pipeline, Execution Engine,
+        and Response Engine stages (Packages 028 and 032), invoke
+        ResponseEngine.build_response() with the resulting Plan, the
+        ExecutionResult, and the finished ExecutionTrace, and return
+        the resulting AgentResponse, wrapping the standardized
+        Response unmodified (Package 027's own "Agent Integration"
+        amendment to Package 026's original PipelineResult-wrapping
+        behavior). Performs no reasoning, decision making, planning,
+        or execution itself - see service.py's own module docstring
+        for the exact orchestration sequence. Raises
+        InvalidAgentRequestError if `request` is not an AgentRequest
+        instance, its `session` field is not an AgentSession instance,
+        or its `conversation` field is not a ConversationSession
+        instance. Raises AgentExecutionError, wrapping the underlying
+        exception, if the delegated CognitivePipeline.run() call, the
+        delegated ExecutionEngine.execute() call, or the delegated
         ResponseEngine.build_response() call raises. Raises AgentError
         if this service's own IService state is not RUNNING."""
