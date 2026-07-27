@@ -1141,3 +1141,38 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - No persistence, no querying, no visualization of traces - each `ExecutionTrace` lives only as long as the `Response` that holds it.
 - No AI, no optimization, no concurrency - unchanged from every prior package in this phase.
 
+## Package 029 - Task Model
+
+### Added
+
+- Added `argus/task/` (`__init__.py`, `task.py`, `status.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Task Model, an immutable description of a single unit of work produced by a Plan. "A Task represents a single unit of work produced by a Plan. This package introduces no execution. Only the model." "The task contains no executable logic. It is purely a value object."
+- `Task` (`argus/task/task.py`) - immutable, `task_id`, `name`, `description`, `status`, `metadata`. Unlike `PlanStep` (constructed directly, no builder, required fields), every field defaults - `Task()` is always valid - the same "value object with a dedicated builder" shape `CognitiveContext`/`PlanningSession`/`ExecutionTrace` (022/023/028) all use.
+- `TaskStatus` (`argus/task/status.py`) - a plain `Enum` (not a `str` subclass), five members: `PENDING`, `READY`, `COMPLETED`, `FAILED`, `CANCELLED`, lowercase string values matching each member's name, mirroring `PlanStatus`'s own shape. "Do not implement transitions" - no transition logic anywhere in this package.
+- `TaskMetadata` (`argus/task/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`'s shape and field names exactly (`created_at`, `version`, `correlation_id`, `extra`), continuing Package 028's own precedent of normalizing a work order's differently-ordered field list to match the established sibling convention rather than the order listed.
+- `TaskBuilder` / `ITaskBuilder` (`argus/task/builder.py`, `argus/task/interfaces.py`) - the one mutable object in this package. "Builder is the only mutable object." `with_name(name)`/`with_description(description)`/`with_status(status)` each validate and overwrite a singular field, last-call-wins; `with_metadata(key, value)` accumulates into the eventual `TaskMetadata.extra`, last-call-wins on repeated keys; `build()` returns an independent `Task` snapshot. `with_name()`/`with_description()` are included despite not being individually named in this package's own four-item Responsibilities list, read as part of the "create task" bullet - see builder.py's own module docstring. `ITaskBuilder` does not inherit `IService` - "no new services" - mirroring `ICognitiveContextBuilder`/`IPlanningSessionBuilder`/`ITraceBuilder`'s own identical choice.
+- `TaskError`, `InvalidTaskError` (`argus/task/exceptions.py`).
+- Added `factory/packages/029_TASK_MODEL.md`.
+- Added `tests/test_task.py` (18 new tests), `tests/test_task_status.py` (8 new tests), `tests/test_task_metadata.py` (10 new tests), `tests/test_task_builder.py` (28 new tests) - covering defaults, immutability, invalid construction, builder behavior, metadata propagation, enumeration correctness, and serialization consistency.
+
+### Changed
+
+- None. This package modifies no pre-existing file - a purely additive, fully isolated package.
+
+### Not Changed
+
+- **`argus/bootstrap.py` is completely unchanged** - "No new services. No bootstrap changes." Confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; `CORE_SERVICES_VERSION` remains `"0.2.8"`. The second package since 023 (after Execution Trace, 028) for which that is true.
+- **`argus/planner/`, `argus/response/`, `argus/pipeline/`, `argus/agent/`, `argus/trace/` are all unchanged** - "Do not modify: Planner, Plan, Pipeline, Response, Agent, Execution Trace." This package is intentionally isolated - confirmed via `git diff --stat` showing zero lines changed in any of them.
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new events."
+- No execution, no scheduling, no workflows, no tools, no persistence - "The Task is a description of work, not work itself."
+
+### ADR Update
+
+- None. `ITaskBuilder` does not inherit `IService` and this package registers no new core service - the same "no ADR-0002 entry" precedent already set by Packages 022, 023, and 028.
+
+### Known Limitations
+
+- **`Task` is never produced by anything** - no Plan, PlanStep, Planner, or any other component in this codebase constructs a `Task`; it is available only to a caller holding a `TaskBuilder` directly. Integrating Tasks into Plans is explicitly deferred to a future package.
+- `TaskStatus` values beyond `PENDING` (`READY`, `COMPLETED`, `FAILED`, `CANCELLED`) are reserved for future packages - no Version 1 code ever produces them automatically.
+- `TaskBuilder.build()` performs no "was `with_name()` ever called" check - an unnamed `Task` (`name=""`) is a valid, buildable value, not an error.
+- `TaskMetadata.extra`'s `MappingProxyType` wrapping is not picklable/deep-copyable via the standard library - an inherent limitation shared by every metadata class in this codebase (`ContextMetadata`, `PlanningMetadata`, `ResponseMetadata`, `TraceMetadata` all wrap `extra` the same way), newly documented here.
+- No execution, no scheduling, no workflows, no tools, no persistence, no concurrency - unchanged from every prior package in this phase.
