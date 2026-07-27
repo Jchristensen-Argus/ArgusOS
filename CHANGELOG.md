@@ -1568,3 +1568,43 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **No transition logic on `DecisionRecordStatus`, no ordering behavior on `DecisionRecordPriority`.**
 - **`DecisionRecord` and `Decision` (Decision Engine) coexist in the same package under different names** - a direct, documented consequence of the collision resolution.
 - No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
+
+---
+
+## Package 040 - Policy Framework
+
+### Added
+
+- Added `argus/policy/` (`__init__.py`, `policy.py`, `metadata.py`, `builder.py`, `status.py`, `scope.py`, `interfaces.py`, `exceptions.py`) - the first-generation Policy domain. "A Policy defines constraints, preferences, or governance that influence future execution." Policies answer one question: "Under what rules should Argus operate?"
+- `Policy` (`argus/policy/policy.py`) - immutable, `policy_id`, `name`, `description`, `status`, `scope`, `metadata`. Every field defaults.
+- `PolicyStatus` (`argus/policy/status.py`) - a plain `Enum`, three members: `ACTIVE`, `INACTIVE`, `ARCHIVED`. No transition logic. `ACTIVE` is the default, matching `WorkspaceStatus`'s own precedent (037) rather than `ProjectStatus`'s/`GoalStatus`'s `PLANNING`.
+- `PolicyScope` (`argus/policy/scope.py`) - a plain `Enum`, seven members: `GLOBAL`, `WORKSPACE`, `PROJECT`, `GOAL`, `PLAN`, `TASK`, `CAPABILITY`. "No inheritance or evaluation logic." Member order mirrors this codebase's own organizational hierarchy, purely presentational - verified via `TypeError` on ordering comparisons. `GLOBAL` is the default.
+- `PolicyMetadata` (`argus/policy/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra` - the identical composition and order `ProjectMetadata` (036), `WorkspaceMetadata` (037), `GoalMetadata` (038), and `DecisionRecordMetadata` (039) established, directly named by this package's own work order as the precedent to follow.
+- `PolicyBuilder` / `IPolicyBuilder` (`argus/policy/builder.py`, `argus/policy/interfaces.py`) - "Builder is the only mutable object." `with_scope()` IS implemented, unlike `with_owner()`/`with_tags()` - identical reasoning to `GoalBuilder`'s/`DecisionRecordBuilder`'s own `priority` field. No `with_policy_id()`.
+- `PolicyError`, `InvalidPolicyError` (`argus/policy/exceptions.py`).
+- Added `factory/packages/040_POLICY_FRAMEWORK.md`.
+- Added `tests/test_policy.py`, `tests/test_policy_builder.py`, `tests/test_policy_metadata.py`, `tests/test_policy_status.py`, `tests/test_policy_scope.py` - 93 new tests, entirely additive.
+
+### Changed
+
+- Nothing. Pre-flight found `argus/policy/` did not exist anywhere in the repository - no collision, unlike Package 039's own `argus/decision/` situation. This is the fourth package in this phase (after 036, 037, 038) to modify zero pre-existing files.
+
+### Not Changed
+
+- **No changes to Workspace, Project, Goal, Plan, Task, Decision, Execution, Capability, Response, Runtime, or Bootstrap.** Confirmed via `git diff --stat` showing zero lines changed outside `argus/policy/` and the four documentation files.
+- **No Policy Engine introduced, even minimally.** "No Policy Engine... This package establishes the architecture only."
+- **No governance relationships implemented** - Workspaces, Projects, Goals, Plans, Tasks, Capabilities, Automations, Decision Engine, AI Model Selection, Approval Workflows are all documented as future relationships only.
+- **No persistence, no AI, no plugins, no automation, no enforcement** - "Policy is a passive domain object only."
+
+### Engineering Decision
+
+- `PolicyMetadata`'s own field order follows Project's/Workspace's/Goal's/DecisionRecord's own established precedent, directly named by this package's own work order for a fourth consecutive time.
+- `PolicyScope`'s own member order mirrors this codebase's own organizational hierarchy diagrams but grants it no behavioral significance - explicitly verified, not merely asserted. See `factory/packages/040_POLICY_FRAMEWORK.md`'s own Engineering Decisions section for the full reasoning.
+
+### Known Limitations
+
+- **No governance relationship between `Policy` and anything it may eventually govern is implemented** - documented only.
+- **`owner`/`tags` are not settable through `PolicyBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `PolicyMetadata` construction.
+- **No transition logic on `PolicyStatus`, no inheritance or evaluation logic on `PolicyScope`.**
+- **No Policy Engine of any kind** - nothing in this codebase currently reads, evaluates, or enforces a Policy's own fields.
+- No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
