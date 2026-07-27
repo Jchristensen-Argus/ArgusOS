@@ -1608,3 +1608,43 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **No transition logic on `PolicyStatus`, no inheritance or evaluation logic on `PolicyScope`.**
 - **No Policy Engine of any kind** - nothing in this codebase currently reads, evaluates, or enforces a Policy's own fields.
 - No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
+
+---
+
+## Package 041 - Automation Framework
+
+### Added
+
+- Added `argus/automation/` (`__init__.py`, `automation.py`, `metadata.py`, `builder.py`, `status.py`, `trigger.py`, `interfaces.py`, `exceptions.py`) - the first-generation Automation domain. "An Automation defines what should run, when it should run, and under what conditions. It is a passive definition only." "No scheduler or execution engine belongs in this package."
+- `Automation` (`argus/automation/automation.py`) - immutable, `automation_id`, `name`, `description`, `status`, `trigger`, `metadata`. Every field defaults.
+- `AutomationStatus` (`argus/automation/status.py`) - a plain `Enum`, four members: `ACTIVE`, `PAUSED`, `DISABLED`, `ARCHIVED`. No transition logic. `ACTIVE` is the default, matching `PolicyStatus`'s (040) / `WorkspaceStatus`'s (037) own precedent.
+- `AutomationTrigger` (`argus/automation/trigger.py`) - a plain `Enum`, four members: `MANUAL`, `SCHEDULE`, `EVENT`, `CONDITION`. "Do not implement scheduling, event handling, or condition evaluation." `MANUAL` is the default - the first-listed member and the most conservative reading of an unspecified trigger simultaneously, requiring no deliberate override of the standard convention.
+- `AutomationMetadata` (`argus/automation/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra` - the identical composition and order `ProjectMetadata` (036), `WorkspaceMetadata` (037), `GoalMetadata` (038), `DecisionRecordMetadata` (039), and `PolicyMetadata` (040) established. "Follow the established metadata convention" - by this package, the least specific phrasing of this instruction yet, since only one such convention remains to follow.
+- `AutomationBuilder` / `IAutomationBuilder` (`argus/automation/builder.py`, `argus/automation/interfaces.py`) - "Builder is the only mutable object." `with_trigger()` IS implemented, unlike `with_owner()`/`with_tags()` - identical reasoning to `PolicyBuilder`'s own `scope` field. No `with_automation_id()`.
+- `AutomationError`, `InvalidAutomationError` (`argus/automation/exceptions.py`).
+- Added `factory/packages/041_AUTOMATION_FRAMEWORK.md`.
+- Added `tests/test_automation.py`, `tests/test_automation_builder.py`, `tests/test_automation_metadata.py`, `tests/test_automation_status.py`, `tests/test_automation_trigger.py` - 93 new tests, entirely additive.
+
+### Changed
+
+- Nothing. Pre-flight found `argus/automation/` did not exist anywhere in the repository - no collision, matching Package 040's own clean situation rather than Package 039's own naming conflict. This is the fifth package in this phase (after 036, 037, 038, 040) to modify zero pre-existing files.
+
+### Not Changed
+
+- **No changes to Workspace, Project, Goal, Plan, Task, Decision, Policy, Execution, Capability, Response, Runtime, or Bootstrap.** Confirmed via `git diff --stat` showing zero lines changed outside `argus/automation/` and the four documentation files.
+- **No scheduler, automation engine, event handling, or condition evaluation introduced, even minimally.** "No scheduler or execution engine belongs in this package."
+- **No relationships implemented** - Policies, Capabilities, Workspaces, Projects, Goals, Plans, Tasks, DecisionRecord, Events, Schedules are all documented as future relationships only.
+- **No persistence, no AI, no plugins, no automation execution** - "Automation is a passive domain object only."
+
+### Engineering Decision
+
+- `AutomationMetadata`'s own field order follows the now-settled six-field convention every sibling metadata module in this phase already agrees on.
+- `AutomationTrigger`'s own default (`MANUAL`) required no deliberate override of the "first-listed member is the default" convention, unlike `GoalPriority`/`DecisionRecordPriority` - the safest choice and the mechanical default happen to coincide here. See `factory/packages/041_AUTOMATION_FRAMEWORK.md`'s own Engineering Decisions section for the full reasoning.
+
+### Known Limitations
+
+- **No relationship between `Automation` and anything it may eventually reference is implemented** - documented only.
+- **`owner`/`tags` are not settable through `AutomationBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `AutomationMetadata` construction.
+- **No transition logic on `AutomationStatus`, no scheduling/event/condition logic behind `AutomationTrigger`.**
+- **No scheduler, no automation engine, no execution of any kind** - an Automation, once built, does nothing.
+- No persistence, no concurrency, no runtime behavior of any kind.
