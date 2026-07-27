@@ -454,47 +454,83 @@ Startup Sequence:
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    24. Construct the Execution Engine (depends, as of Package 033,
-        on the already-constructed CapabilityRegistry - stored only,
-        never called; see argus.execution_engine.engine's own module
-        docstring) and register it with the Container, per Package
-        032, amended by Package 033. Bootstrap is the only place that
+    24. Construct the Capability Executor (depends on the
+        already-constructed CapabilityRegistry, genuinely called by
+        every resolve() invocation; see
+        argus.capability_executor.executor's own module docstring)
+        and register it with the Container, per Package 034. Bootstrap
+        is the only place that constructs CapabilityExecutor directly;
+        every other subsystem must resolve it from the Container.
+        Constructed immediately after the Cognitive Pipeline and
+        immediately before the Execution Engine, per the Architectural
+        Position diagram this package's own work order gives
+        ("Execution Engine -> Capability Executor -> Capability
+        Registry -> Capability") - this placement IS dependency-
+        driven: CapabilityExecutor genuinely needs a live
+        ICapabilityRegistry reference at construction, and the
+        Execution Engine (step 25) in turn needs a live
+        ICapabilityExecutor reference at its own construction. This is
+        the fifth new runtime service since Package 021 (Packages
+        022-023 deliberately introduced no new core service at all;
+        Package 024 modified an existing one; Packages 029-031, and
+        033, deliberately introduced no new core service either).
+        CapabilityExecutor DOES implement IService, per the same
+        "core service" reading already applied to the Response Engine
+        (Package 027) and the Execution Engine (Package 032) - but
+        resolve() is NOT gated on the executor's own RUNNING state,
+        mirroring the Knowledge Graph (Package 018), the Reasoning
+        Engine (Package 020), and the Decision Engine (Package 021) -
+        each also zero-gated despite holding a genuine constructor
+        dependency - see argus/capability_executor/interfaces.py's
+        Architectural Note and ADR-0002's newly appended Empirical
+        Finding for this package. Like every other IService adopter,
+        it is registered only (LifecycleState.REGISTERED) here - its
+        own initialize()/start() are deliberately NOT called by this
+        package, for the same divergence-avoidance reasoning recorded
+        in ADR-0002 and already applied to every prior adopter.
+    25. Construct the Execution Engine (depends, as of Package 034,
+        on the already-constructed CapabilityExecutor - genuinely
+        called once per Task during execute(), replacing Package
+        033's own stored-but-unused CapabilityRegistry reference; see
+        argus.execution_engine.engine's own module docstring) and
+        register it with the Container, per Package 032, amended by
+        Packages 033 and 034. Bootstrap is the only place that
         constructs ExecutionEngine directly; every other subsystem
         must resolve it from the Container.
-        Constructed immediately after the Cognitive Pipeline and
+        Constructed immediately after the Capability Executor and
         immediately before the Response Engine, per the Bootstrap
         section's explicit dependency order ("Planner -> Pipeline ->
-        Execution Engine -> Response Engine -> Agent") - like the
-        Response Engine's own placement one step later, this placement
-        is dependency-driven in the weakest possible sense: nothing
-        about ExecutionEngine's own construction actually requires
-        anything constructed before it ("the Execution Engine accepts
-        a Plan," a per-call argument to execute(), never a constructor
-        dependency) - it is placed here solely because the Agent
-        Service (step 26) needs a live IExecutionEngine reference at
-        its own construction, and the explicit dependency order names
-        this position. This is the fourth new runtime service since
-        Package 021 (Packages 022-023 deliberately introduced no new
-        core service at all; Package 024 modified an existing one;
-        Packages 029-031 deliberately introduced no new core service
-        either). ExecutionEngine DOES implement IService, per the same
-        "core service" reading already applied to the Response Engine
-        (Package 027) - but, like the Response Engine, execute() is
-        NOT gated on the engine's own RUNNING state, mirroring the
-        Knowledge Graph (Package 018), the Reasoning Engine (Package
-        020), the Decision Engine (Package 021), and the Response
-        Engine (Package 027) - see
+        Execution Engine -> Response Engine -> Agent") - it is placed
+        here because the Agent Service (step 27) needs a live
+        IExecutionEngine reference at its own construction, and the
+        explicit dependency order names this position, while
+        ExecutionEngine's own construction genuinely requires the
+        already-constructed CapabilityExecutor (step 24). This is the
+        fourth new runtime service since Package 021 (Packages 022-023
+        deliberately introduced no new core service at all; Package
+        024 modified an existing one; Packages 029-031 deliberately
+        introduced no new core service either). ExecutionEngine DOES
+        implement IService, per the same "core service" reading
+        already applied to the Response Engine (Package 027) - but
+        execute() is NOT gated on the engine's own RUNNING state,
+        mirroring the Knowledge Graph (Package 018), the Reasoning
+        Engine (Package 020), the Decision Engine (Package 021), the
+        Response Engine (Package 027), and (as of this package) the
+        Capability Executor - see
         argus/execution_engine/interfaces.py's Architectural Note and
         ADR-0002's newly appended Empirical Finding for this package.
-        ExecutionEngine is also only the second core service in this
-        codebase's own history - after ResponseEngine (027) - with a
-        fully empty constructor, for the identical reason. Like every
-        other IService adopter, it is registered only
-        (LifecycleState.REGISTERED) here - its own initialize()/
-        start() are deliberately NOT called by this package, for the
-        same divergence-avoidance reasoning recorded in ADR-0002 and
-        already applied to every prior adopter.
-    25. Construct the Response Engine (depends on nothing) and
+        ResponseEngine (027) remains the sole core service in this
+        codebase's own history with a fully empty constructor -
+        ExecutionEngine held that distinction only briefly, from
+        Package 032 until Package 033 gave it a (then-unused)
+        constructor dependency; as of this package that dependency is
+        both present and genuinely used. Like every other IService
+        adopter, it is registered only (LifecycleState.REGISTERED)
+        here - its own initialize()/start() are deliberately NOT
+        called by this package, for the same divergence-avoidance
+        reasoning recorded in ADR-0002 and already applied to every
+        prior adopter.
+    26. Construct the Response Engine (depends on nothing) and
         register it with the Container, per Package 027. Bootstrap is
         the only place that constructs ResponseEngine directly; every
         other subsystem must resolve it from the Container.
@@ -509,7 +545,7 @@ Startup Sequence:
         constructed before it ("ResponseEngine may depend only on:
         Plan," and Plan is a per-call argument to build_response(),
         never a constructor dependency) - it is placed here solely
-        because the Agent Service (step 26) needs a live
+        because the Agent Service (step 27) needs a live
         IResponseEngine reference at its own construction, and the
         explicit dependency order names this position. This is the
         third new runtime service since Package 021 (Packages 022-023
@@ -529,7 +565,7 @@ Startup Sequence:
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    26. Construct the Agent Service (depends on the Cognitive
+    27. Construct the Agent Service (depends on the Cognitive
         Pipeline, the Execution Engine, and the Response Engine) and
         register it with the Container, per Packages 026, 027, and
         032. Bootstrap is the only place that constructs AgentService
@@ -558,18 +594,19 @@ Startup Sequence:
         initialize()/start() are deliberately NOT called by this
         package, for the same divergence-avoidance reasoning recorded
         in ADR-0002 and already applied to every prior adopter.
-    27. Register the twenty-five core services (Configuration, Logger,
+    28. Register the twenty-six core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
         Engine, Conversation Manager, Capability Registry, Intent
         Dispatcher, Plugin Manager, Planner, Knowledge Graph, Memory
         Integration, Reasoning Engine, Decision Engine, Agent Runtime,
-        Connector Manager, Cognitive Pipeline, Execution Engine,
-        Response Engine, Agent Service) in the Service Registry
-        (identity/descriptive data only) and in the Lifecycle Manager,
-        where each enters LifecycleState.REGISTERED. None of them are
+        Connector Manager, Cognitive Pipeline, Capability Executor,
+        Execution Engine, Response Engine, Agent Service) in the
+        Service Registry (identity/descriptive data only) and in the
+        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
+        None of them are
         initialized or started by this package.
-    28. Construct and start the Application.
+    29. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
@@ -618,6 +655,7 @@ from argus.dispatcher import (
     build_action_from_capability,
 )
 from argus.events import IEventBus, InMemoryEventBus
+from argus.capability_executor import CapabilityExecutor, ICapabilityExecutor
 from argus.execution_engine import ExecutionEngine, IExecutionEngine
 from argus.intent import IIntentRouter, IntentRouter
 from argus.knowledge import IKnowledgeService, JSONKnowledgeStorage, KnowledgeService
@@ -792,7 +830,10 @@ def bootstrap() -> Application:
     cognitive_pipeline = CognitivePipeline(planner=planner)
     container.register("cognitive_pipeline", cognitive_pipeline)
 
-    execution_engine = ExecutionEngine(capability_registry=capability_registry)
+    capability_executor = CapabilityExecutor(capability_registry=capability_registry)
+    container.register("capability_executor", capability_executor)
+
+    execution_engine = ExecutionEngine(capability_executor=capability_executor)
     container.register("execution_engine", execution_engine)
 
     response_engine = ResponseEngine()
@@ -828,6 +869,7 @@ def bootstrap() -> Application:
         agent_runtime=agent_runtime,
         connector_manager=connector_manager,
         cognitive_pipeline=cognitive_pipeline,
+        capability_executor=capability_executor,
         execution_engine=execution_engine,
         response_engine=response_engine,
         agent_service=agent_service,
@@ -863,6 +905,7 @@ def _register_core_services(
     agent_runtime: IAgentRuntime,
     connector_manager: IConnectorManager,
     cognitive_pipeline: ICognitivePipeline,
+    capability_executor: ICapabilityExecutor,
     execution_engine: IExecutionEngine,
     response_engine: IResponseEngine,
     agent_service: IAgentService,
@@ -894,35 +937,42 @@ def _register_core_services(
     Intent Router, the Workflow Engine, the Conversation Manager, the
     Intent Dispatcher, the Knowledge Graph, Memory Integration, the
     Reasoning Engine, the Decision Engine, the Agent Runtime, the
-    Connector Manager, the Cognitive Pipeline, the Execution Engine,
-    the Response Engine, and the Agent Service are fifteen of these
-    twenty-five that actually implement IService (see ADR-0002) -
-    though the Knowledge Graph, the Reasoning Engine, the Decision
-    Engine, the Response Engine, and the Execution Engine, each per
-    its own explicit work order instruction rather than an independent
-    application of ADR-0002's criterion, are the second, third,
-    fourth, fifth, and sixth of these fifteen (after the Intent
-    Router) with no method gated on the RUNNING state at all - the
-    Response Engine and the Execution Engine are also the first and
-    second of these six for which the underlying reason is not merely
-    "no method happens to call anything gateable" but "the service
-    holds no constructor dependency whatsoever" ("ResponseEngine may
-    depend only on: Plan"/"the Execution Engine accepts a Plan," in
-    both cases a per-call argument, never injected); Memory
-    Integration, the Cognitive Pipeline, and the Agent Service, by
-    contrast, are each explicitly instructed to adopt IService AND
-    independently satisfy ADR-0002's criterion on its own merits
+    Connector Manager, the Cognitive Pipeline, the Capability
+    Executor, the Execution Engine, the Response Engine, and the Agent
+    Service are sixteen of these twenty-six that actually implement
+    IService (see ADR-0002) - though the Knowledge Graph, the
+    Reasoning Engine, the Decision Engine, the Response Engine, the
+    Execution Engine, and the Capability Executor, each per its own
+    explicit work order instruction rather than an independent
+    application of ADR-0002's criterion, are the second through
+    seventh of these sixteen (after the Intent Router) with no method
+    gated on the RUNNING state at all - the Response Engine remains
+    the sole one of these seven for which the underlying reason is
+    "the service holds no constructor dependency whatsoever"
+    ("ResponseEngine may depend only on: Plan," a per-call argument,
+    never injected); the Knowledge Graph, the Reasoning Engine, the
+    Decision Engine, the Execution Engine (as of Package 034, via its
+    own CapabilityExecutor dependency), and the Capability Executor
+    itself are each zero-gated despite holding a genuine constructor
+    dependency, since none of their own methods perform an effectful,
+    stateful, or external operation a RUNNING/not-RUNNING distinction
+    could meaningfully police (see each one's own interfaces.py
+    Architectural Note for the full reasoning); Memory Integration,
+    the Cognitive Pipeline, and the Agent Service, by contrast, are
+    each explicitly instructed to adopt IService AND independently
+    satisfy ADR-0002's criterion on its own merits
     (synchronize_memory()/synchronize_all()/remove_memory(), run(),
     and run(), respectively, are genuinely gated) - see ADR-0002's
     newly appended Empirical Findings for Packages 019, 020, 021, 025,
-    026, 027, and 032. The Capability Registry, the Plugin Manager,
-    and the Planner deliberately do not implement IService at all (see
-    argus/capability/interfaces.py's, argus/plugins/interfaces.py's,
-    and argus/planner/interfaces.py's Architectural Notes). This
-    function still does not call any IService adopter's
-    initialize()/start() directly - see the Startup Sequence note in
-    this module's docstring for why exercising their real IService
-    lifecycles during bootstrap was deliberately avoided.
+    026, 027, 032, and 034. The Capability Registry, the Plugin
+    Manager, and the Planner deliberately do not implement IService at
+    all (see argus/capability/interfaces.py's,
+    argus/plugins/interfaces.py's, and argus/planner/interfaces.py's
+    Architectural Notes). This function still does not call any
+    IService adopter's initialize()/start() directly - see the
+    Startup Sequence note in this module's docstring for why
+    exercising their real IService lifecycles during bootstrap was
+    deliberately avoided.
 
     Parameters:
         service_registry: Where each core service is recorded as a
@@ -949,6 +999,7 @@ def _register_core_services(
         agent_runtime: The Agent Runtime instance.
         connector_manager: The Connector Manager instance.
         cognitive_pipeline: The Cognitive Pipeline instance.
+        capability_executor: The Capability Executor instance.
         execution_engine: The Execution Engine instance.
         response_engine: The Response Engine instance.
         agent_service: The Agent Service instance.
@@ -976,6 +1027,7 @@ def _register_core_services(
         ("agent_runtime", agent_runtime, IAgentRuntime),
         ("connector_manager", connector_manager, IConnectorManager),
         ("cognitive_pipeline", cognitive_pipeline, ICognitivePipeline),
+        ("capability_executor", capability_executor, ICapabilityExecutor),
         ("execution_engine", execution_engine, IExecutionEngine),
         ("response_engine", response_engine, IResponseEngine),
         ("agent_service", agent_service, IAgentService),

@@ -4,7 +4,12 @@ import dataclasses
 import logging
 import unittest
 
-from argus.capability import CapabilityRegistry, ICapabilityRegistry
+from argus.capability import Capability, CapabilityRegistry, ICapabilityRegistry
+from argus.capability_executor import (
+    CapabilityExecutionStatus,
+    CapabilityExecutor,
+    ICapabilityExecutor,
+)
 from argus.events import InMemoryEventBus
 from argus.execution_engine import (
     ExecutionEngine,
@@ -32,8 +37,12 @@ def _capability_registry() -> CapabilityRegistry:
     return CapabilityRegistry(event_bus=InMemoryEventBus(logger=_silent_logger()))
 
 
-def _engine(capability_registry=None) -> ExecutionEngine:
-    return ExecutionEngine(capability_registry=capability_registry or _capability_registry())
+def _capability_executor(capability_registry=None) -> CapabilityExecutor:
+    return CapabilityExecutor(capability_registry=capability_registry or _capability_registry())
+
+
+def _engine(capability_executor=None) -> ExecutionEngine:
+    return ExecutionEngine(capability_executor=capability_executor or _capability_executor())
 
 
 def _plan(**kwargs) -> Plan:
@@ -53,43 +62,79 @@ class ExecutionEngineIdentityTests(unittest.TestCase):
     def test_starts_in_created_state(self):
         self.assertEqual(_engine().status(), LifecycleState.CREATED)
 
-    def test_constructor_requires_capability_registry(self):
-        # Package 033: "Modify constructor only... Accept:
-        # CapabilityRegistry" - capability_registry is now a required
-        # constructor argument, unlike Package 032's own fully empty
-        # constructor.
+    def test_constructor_requires_capability_executor(self):
+        # Package 034: "ExecutionEngine now owns: CapabilityExecutor" -
+        # capability_executor is now a required constructor argument,
+        # replacing Package 033's own capability_registry parameter.
         with self.assertRaises(TypeError):
             ExecutionEngine()  # type: ignore[call-arg]
 
+    def test_constructor_no_longer_accepts_capability_registry(self):
+        with self.assertRaises(TypeError):
+            ExecutionEngine(capability_registry=_capability_registry())  # type: ignore[call-arg]
 
-# -- constructor injection (Package 033) ---------------------------------
+
+# -- constructor injection (Package 034) ---------------------------------
 
 
 class ConstructorInjectionTests(unittest.TestCase):
-    def test_capability_registry_is_stored(self):
-        registry = _capability_registry()
-        engine = ExecutionEngine(capability_registry=registry)
-        self.assertIs(engine._capability_registry, registry)
+    def test_capability_executor_is_stored(self):
+        executor = _capability_executor()
+        engine = ExecutionEngine(capability_executor=executor)
+        self.assertIs(engine._capability_executor, executor)
 
-    def test_accepts_any_icapabilityregistry_implementation(self):
-        registry = _capability_registry()
-        engine = ExecutionEngine(capability_registry=registry)
+    def test_accepts_any_icapabilityexecutor_implementation(self):
+        executor = _capability_executor()
+        engine = ExecutionEngine(capability_executor=executor)
         self.assertIsInstance(engine, ExecutionEngine)
-        self.assertIsInstance(registry, ICapabilityRegistry)
+        self.assertIsInstance(executor, ICapabilityExecutor)
 
-    def test_capability_registry_is_never_called_by_execute(self):
-        # "No dispatch. No execution. No lookup. No behavior changes."
-        # A registry whose every method raises still lets execute()
-        # succeed, since execute() never calls any of them.
-        class _ExplodingRegistry:
-            def __getattr__(self, name):
-                raise AssertionError(
-                    f"ExecutionEngine.execute() must never call "
-                    f"CapabilityRegistry.{name}() in Package 033."
+    def test_execute_calls_resolve_once_per_task_in_order(self):
+        calls = []
+
+        class _RecordingExecutor:
+            def resolve(self, task):
+                calls.append(task)
+                from argus.capability_executor import CapabilityExecutionResult
+
+                return CapabilityExecutionResult(task=task)
+
+        first = Task(name="A")
+        second = Task(name="B")
+        engine = ExecutionEngine(capability_executor=_RecordingExecutor())
+        engine.execute(_plan(tasks=[first, second]))
+
+        self.assertEqual(calls, [first, second])
+
+    def test_execute_ignores_the_returned_capabilityexecutionresult(self):
+        # "Ignore the returned status for now." A CapabilityExecutor
+        # whose resolve() always reports NOT_FOUND still lets every
+        # Task complete.
+        class _AlwaysNotFoundExecutor:
+            def resolve(self, task):
+                from argus.capability_executor import (
+                    CapabilityExecutionResult,
+                    CapabilityExecutionStatus,
                 )
 
-        engine = ExecutionEngine(capability_registry=_ExplodingRegistry())
+                return CapabilityExecutionResult(
+                    task=task, status=CapabilityExecutionStatus.NOT_FOUND
+                )
+
+        engine = ExecutionEngine(capability_executor=_AlwaysNotFoundExecutor())
         result = engine.execute(_plan(tasks=[Task(name="A")]))
+
+        self.assertEqual(result.status, ExecutionStatus.COMPLETED)
+        self.assertEqual(len(result.completed_tasks), 1)
+
+    def test_empty_plan_never_calls_resolve(self):
+        class _ExplodingExecutor:
+            def resolve(self, task):
+                raise AssertionError("resolve() must not be called for an empty Plan.")
+
+        engine = ExecutionEngine(capability_executor=_ExplodingExecutor())
+        result = engine.execute(_plan())
+
         self.assertEqual(result.status, ExecutionStatus.COMPLETED)
 
 
@@ -217,6 +262,28 @@ class PopulatedPlanTests(unittest.TestCase):
         self.assertEqual(len(result.completed_tasks), 1)
         self.assertEqual(result.status, ExecutionStatus.COMPLETED)
 
+    def test_every_task_still_completes_regardless_of_resolution_outcome(self):
+        # A mix of resolvable and unresolvable Task names - "Continue
+        # placing every Task into completed_tasks (unchanged behavior
+        # from Package 032)."
+        registry = _capability_registry()
+        registry.register(
+            Capability(
+                name="A",
+                description="d",
+                intent_types=(IntentType.UNKNOWN,),
+                action_kind="workflow",
+                workflow_id="w",
+            )
+        )
+        engine = _engine(capability_executor=_capability_executor(registry))
+        plan = _plan(tasks=[Task(name="A"), Task(name="Unresolvable")])
+
+        result = engine.execute(plan)
+
+        self.assertEqual(len(result.completed_tasks), 2)
+        self.assertEqual(result.status, ExecutionStatus.COMPLETED)
+
 
 class InvalidPlanTests(unittest.TestCase):
     def test_non_plan_argument_raises(self):
@@ -265,18 +332,16 @@ class ImmutableResultTests(unittest.TestCase):
 
 
 class NoDependencyToFailTests(unittest.TestCase):
-    def test_engine_holds_exactly_state_and_capability_registry(self):
-        # As of Package 033, ExecutionEngine holds one constructor-
-        # injected collaborator (capability_registry) - but execute()
-        # itself still calls into nothing, so the only failure mode
-        # remains an invalid Plan reference, covered by
-        # InvalidPlanTests above; see ConstructorInjectionTests for
-        # confirmation execute() never touches capability_registry.
-        registry = _capability_registry()
-        engine = ExecutionEngine(capability_registry=registry)
+    def test_engine_holds_exactly_state_and_capability_executor(self):
+        # As of Package 034, ExecutionEngine holds one constructor-
+        # injected collaborator (capability_executor), genuinely
+        # called once per Task - see ConstructorInjectionTests above
+        # for confirmation of exactly how it is called.
+        executor = _capability_executor()
+        engine = ExecutionEngine(capability_executor=executor)
         self.assertEqual(
             vars(engine),
-            {"_capability_registry": registry, "_state": LifecycleState.CREATED},
+            {"_capability_executor": executor, "_state": LifecycleState.CREATED},
         )
 
 

@@ -1333,3 +1333,44 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **`capability_id` is not a real field name anywhere in this codebase** - it is a documented alias for the pre-existing `id` field.
 - **Duplicate-name rejection broke two pre-existing tests in `tests/test_planner.py`** - both registered three Capabilities sharing a default name within a single registry; fixed by giving each a distinct name, confirmed via a full `python -m pytest` run to be the only two affected tests anywhere in the repository.
 - No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.
+
+## Package 034 - Capability Executor
+
+### Added
+
+- Added `argus/capability_executor/` (`__init__.py`, `executor.py`, `result.py`, `status.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`) - the first-generation Capability Executor. "The Capability Executor resolves a Capability for a Task and produces an immutable CapabilityExecutionResult... It establishes the execution contract only."
+- `CapabilityExecutionResult` (`argus/capability_executor/result.py`) - immutable, `execution_id`, `task`, `capability`, `status`, `metadata`. Every field defaults - `CapabilityExecutionResult()` is always valid - the same "value object with a dedicated builder" shape `CognitiveContext`/`PlanningSession`/`ExecutionTrace`/`Task`/`TaskRelationship`/`ExecutionResult` (022/023/028/029/031/032) all use. `task`/`capability` hold the actual objects directly, both defaulting to `None`; `capability` stays `None` in the NOT_FOUND case.
+- `CapabilityExecutionStatus` (`argus/capability_executor/status.py`) - a plain `Enum` (not a `str` subclass), five members: `PENDING`, `RESOLVED`, `COMPLETED`, `FAILED`, `NOT_FOUND`. "No transition logic." Only `COMPLETED`/`NOT_FOUND` are ever produced by Version 1 - see Engineering Decision below for why a successful match produces `COMPLETED`, not the seemingly more intuitive `RESOLVED`.
+- `CapabilityExecutionMetadata` (`argus/capability_executor/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`/`TaskMetadata`/`RelationshipMetadata`/`ExecutionMetadata`/`CapabilityMetadata`'s shape and field names exactly, per this package's own explicit "Follow established metadata conventions" instruction - the first package to have this recurring field-order tension settled directly by the work order itself.
+- `CapabilityExecutionResultBuilder` / `ICapabilityExecutionResultBuilder` (`argus/capability_executor/builder.py`, `argus/capability_executor/interfaces.py`) - "Builder is the only mutable object." `with_task()`/`with_capability()`/`with_status()` are singular, overwritten not accumulated; `with_metadata(key, value)` accumulates into `CapabilityExecutionMetadata.extra`; `build()` returns an independent snapshot. No `with_execution_id()` - unlike `CapabilityBuilder` (033), this package's own Responsibilities list does not name "assign id," matching `RelationshipBuilder`'s (031)/`ExecutionResultBuilder`'s (032) own shape instead.
+- `CapabilityExecutor` / `ICapabilityExecutor` (`argus/capability_executor/executor.py`, `argus/capability_executor/interfaces.py`) - a new core service. `resolve(task)` validates the Task, then looks up `task.name` against the injected `CapabilityRegistry` via `get_by_name()` (033): a match returns `status=COMPLETED` with the found Capability; `CapabilityNotFoundError` is treated as a normal outcome, returning `status=NOT_FOUND` with `capability=None`. "Only deterministic resolution" - no other registry method is called, and the found Capability is never invoked. `ICapabilityExecutor` inherits `IService`, but `resolve()` is never gated - the seventh zero-gated adopter, the sixth divergent ADR-0002 case.
+- `CapabilityExecutionError`, `InvalidTaskReferenceError`, `InvalidCapabilityExecutionResultError` (`argus/capability_executor/exceptions.py`).
+- Added `factory/packages/034_CAPABILITY_EXECUTOR.md`.
+- Added `tests/test_capability_execution_result.py`, `tests/test_capability_execution_status.py`, `tests/test_capability_execution_metadata.py`, `tests/test_capability_execution_builder.py`, `tests/test_capability_executor.py` - 104 new tests, entirely additive.
+
+### Changed
+
+- **`argus/execution_engine/engine.py`** - `ExecutionEngine.__init__()`'s own Package 033 `capability_registry: ICapabilityRegistry` parameter is *replaced* by `capability_executor: ICapabilityExecutor` - a breaking constructor change, explicitly implied by this package's own single-chain Architectural Position diagram (`Execution Engine -> Capability Executor -> Capability Registry -> Capability`, no skip-level arrow) and its own "ExecutionEngine now owns: CapabilityExecutor" phrasing. Unlike Package 033's own inert constructor change, this one is genuinely used: `execute()` now sends every Task in `plan.tasks` to `capability_executor.resolve(task)` before placing it into `completed_tasks`, discarding the returned `CapabilityExecutionResult` immediately - "Ignore the returned status for now... Continue placing every Task into completed_tasks (unchanged behavior from Package 032)." An empty Plan never calls `resolve()` at all.
+- **`argus/execution_engine/interfaces.py`** - new "Package 034 Amendment" Architectural Note clarifying that `execute()`'s new call into `capability_executor.resolve()` (itself zero-gated) introduces no new gating opportunity - `IExecutionEngine` remains the sixth zero-gated adopter and fifth divergent ADR-0002 case, both facts unchanged since Package 032.
+- **`argus/agent/service.py`** - `AgentService.run()` gains one new trace step, `("CapabilityExecutor", "resolved")`, positioned between `("ExecutionEngine", "processed")` and `("ResponseEngine", "invoked")` - recorded honestly, after the fact, since resolution already happened inside `execution_engine.execute()` before that call returns. `AgentService` gains no new constructor dependency and `run()` gains no new interaction step - `CapabilityExecutor` is owned by `ExecutionEngine`, not `AgentService`.
+- **`argus/bootstrap.py`** - constructs `capability_executor = CapabilityExecutor(capability_registry=capability_registry)`, registers it as `"capability_executor"`, immediately after the Cognitive Pipeline and immediately before the Execution Engine; `execution_engine = ExecutionEngine(capability_executor=capability_executor)`. `_register_core_services()` gains a matching parameter and `core_services` tuple entry - twenty-six core services now registered (up from twenty-five). Startup Sequence docstring renumbered (steps 24-29) to insert the new Capability Executor construction step, and its own IService-adopter narrative paragraph corrected and extended. `CORE_SERVICES_VERSION` remains `"0.3.3"`, not advanced by this package.
+- **`tests/test_execution_engine.py`** (rewritten throughout), **`tests/test_agent_service.py`** (updated throughout), **`tests/test_bootstrap.py`** (+4), **`argus/tests/test_bootstrap.py`** (`CORE_SERVICE_NAMES` +1 entry) - see Testing section of `factory/packages/034_CAPABILITY_EXECUTOR.md` for the full breakdown.
+
+### Not Changed
+
+- **No changes to `Response`, `Planner`, `Runtime`, or `Events`.** Confirmed via `git diff --stat` showing zero lines changed in `argus/response/`, `argus/planner/`, `argus/planning/`, `argus/runtime/`, `argus/events/event_types.py`.
+- **No redesign of `CapabilityRegistry`** - `argus/capability/` is completely untouched by this package.
+- **No AI, no plugins, no external tools, no API calls, no business logic** - "It establishes the execution contract only."
+- **No execution occurs** - a found Capability is never invoked.
+
+### ADR Update
+
+- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` gained a new Empirical Finding (Package 034) - `ICapabilityExecutor` is the seventh zero-gated `IService` adopter and the sixth divergent case (after 018, 020, 021, 027, 032), producing this ADR's own first run of three consecutive divergent findings (027, 032, 034). ADR Status remains `Proposed`.
+
+### Known Limitations
+
+- **`ExecutionEngine` still ignores every `CapabilityExecutionResult` it receives** - a NOT_FOUND Task completes exactly like a COMPLETED one; `ExecutionStatus.FAILED` remains unreachable.
+- **Resolution is name-based only** - no intent-type matching, no fuzzy matching, no ranking among candidates.
+- **`CapabilityExecutionStatus.RESOLVED`/`FAILED` are never produced by any Version 1 code path.**
+- **`ExecutionEngine` no longer holds any direct `ICapabilityRegistry` reference** - a deliberate consequence of the diagram's own single-chain shape.
+- No persistence, no concurrency, no scheduling - unchanged from every prior package in this phase.

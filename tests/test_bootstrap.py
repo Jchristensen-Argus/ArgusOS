@@ -9,6 +9,7 @@ from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.agent import IAgentService, AgentService, AgentSession, AgentRequest
+from argus.capability_executor import CapabilityExecutor, ICapabilityExecutor
 from argus.execution_engine import ExecutionEngine, ExecutionStatus as EngineExecutionStatus, IExecutionEngine
 from argus.response import IResponseEngine, ResponseEngine
 from argus.pipeline import ICognitivePipeline, CognitivePipeline, PipelineRequest
@@ -51,6 +52,7 @@ CORE_SERVICE_NAMES = (
     "agent_runtime",
     "connector_manager",
     "cognitive_pipeline",
+    "capability_executor",
     "execution_engine",
     "response_engine",
     "agent_service",
@@ -716,17 +718,74 @@ class BootstrapTests(unittest.TestCase):
         finally:
             application.shutdown()
 
-    def test_bootstrap_execution_engine_receives_the_containers_own_capability_registry(self):
-        # Package 033: "ExecutionEngine receives a reference to
-        # CapabilityRegistry." Confirms real dependency injection - the
-        # same CapabilityRegistry singleton the container itself
-        # resolves, not a separate instance constructed on the side.
+    def test_bootstrap_execution_engine_receives_the_containers_own_capability_executor(self):
+        # Package 034: "ExecutionEngine now owns: CapabilityExecutor" -
+        # replacing Package 033's own capability_registry constructor
+        # parameter. Confirms real dependency injection - the same
+        # CapabilityExecutor singleton the container itself resolves,
+        # not a separate instance constructed on the side.
         application = bootstrap()
 
         try:
             execution_engine = application.container.resolve("execution_engine")
+            capability_executor = application.container.resolve("capability_executor")
+            self.assertIs(execution_engine._capability_executor, capability_executor)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_registers_capability_executor_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("capability_executor"))
+            capability_executor = application.container.resolve("capability_executor")
+            self.assertIsInstance(capability_executor, ICapabilityExecutor)
+            self.assertIsInstance(capability_executor, CapabilityExecutor)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_capability_executor_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            capability_executor = application.container.resolve("capability_executor")
+            self.assertEqual(capability_executor.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status(
+                    "capability_executor"
+                ),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_capability_executor_receives_the_containers_own_capability_registry(self):
+        application = bootstrap()
+
+        try:
+            capability_executor = application.container.resolve("capability_executor")
             capability_registry = application.container.resolve("capability_registry")
-            self.assertIs(execution_engine._capability_registry, capability_registry)
+            self.assertIs(capability_executor._capability_registry, capability_registry)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_capability_executor_resolves_a_bootstrap_registered_capability(self):
+        # Confirms the end-to-end wiring against a real, bootstrap-
+        # registered Capability - one of the five default workflow
+        # capabilities population registers under
+        # "{IntentType.name.title()} Capability".
+        from argus.task import Task
+
+        application = bootstrap()
+
+        try:
+            capability_executor = application.container.resolve("capability_executor")
+            capability_registry = application.container.resolve("capability_registry")
+            existing_capability = capability_registry.list_capabilities()[0]
+
+            result = capability_executor.resolve(Task(name=existing_capability.name))
+
+            self.assertIs(result.capability, existing_capability)
         finally:
             application.shutdown()
 
@@ -863,7 +922,13 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(response.response.status, PlanStatus.CREATED)
                 self.assertEqual(
                     [step.component for step in response.response.execution_trace.steps],
-                    ["AgentService", "CognitivePipeline", "ExecutionEngine", "ResponseEngine"],
+                    [
+                        "AgentService",
+                        "CognitivePipeline",
+                        "ExecutionEngine",
+                        "CapabilityExecutor",
+                        "ResponseEngine",
+                    ],
                 )
                 self.assertEqual(
                     response.response.execution_result.status, EngineExecutionStatus.COMPLETED

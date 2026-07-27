@@ -161,14 +161,16 @@ Interaction Sequence - run() Does Exactly Nine Things:
        second live service call this method makes (Package 032). Any
        exception it raises is caught and re-raised as
        AgentExecutionError the same way step 4's failures are.
-    7. Record two more steps onto the same builder -
-       `("ExecutionEngine", "processed")`, then `("ResponseEngine",
-       "invoked")` - and call `.build()` to produce the finished,
-       immutable `ExecutionTrace` - see the "Engineering Decision" note
-       above for why the "ResponseEngine" step is recorded here,
-       before invocation, and the "Package 032 Amendment" note above
-       for why the "ExecutionEngine" step is instead recorded after
-       its own call completes.
+    7. Record three more steps onto the same builder -
+       `("ExecutionEngine", "processed")`, then `("CapabilityExecutor",
+       "resolved")` (Package 034), then `("ResponseEngine", "invoked")`
+       - and call `.build()` to produce the finished, immutable
+       `ExecutionTrace` - see the "Engineering Decision" note above for
+       why the "ResponseEngine" step is recorded here, before
+       invocation, and the "Package 032"/"Package 034" Amendment notes
+       above for why the "ExecutionEngine" and "CapabilityExecutor"
+       steps are instead recorded after the work they each describe
+       has already happened.
     8. Invoke `response_engine.build_response(pipeline_result.plan,
        execution_result, execution_trace)` - the third live service
        call, made with the Plan the Cognitive Pipeline's own
@@ -197,6 +199,26 @@ Interaction Sequence - run() Does Exactly Nine Things:
     `AgentService` itself holds no `IEventBus` reference at all, the
     same "nothing of its own to publish" shape `CognitivePipeline`
     (Package 025) already established two layers below.
+
+Package 034 Amendment - One More Trace Step, No New Constructor
+Dependency, No New Interaction Step:
+    Per this package's own explicit Execution Trace instruction: "Add
+    one new trace entry: CapabilityExecutor, action = resolved. No
+    other trace changes." Unlike Packages 027 and 032, this package
+    adds no new constructor dependency to `AgentService` and no new
+    interaction step to `run()`'s own sequence - `CapabilityExecutor`
+    is owned by `ExecutionEngine`, not by `AgentService` (see
+    argus.execution_engine.engine's own module docstring), and is
+    already called, once per Task, inside step 6's own
+    `execution_engine.execute()` call, before that call returns.
+    `("CapabilityExecutor", "resolved")` is recorded honestly, after
+    the fact - by the time `trace_builder.with_step("ExecutionEngine",
+    "processed")` runs, every Task in the Plan has already been sent
+    through `CapabilityExecutor.resolve()` - positioned between
+    `("ExecutionEngine", "processed")` and `("ResponseEngine",
+    "invoked")`, mirroring `("ExecutionEngine", "processed")`'s own
+    Package 032 placement immediately after the call it describes
+    actually completed.
 
 Dependency Boundary - CognitivePipeline, ExecutionEngine, And
 ResponseEngine Only, Plus TraceBuilder:
@@ -416,6 +438,7 @@ class AgentService(IAgentService):
             ) from error
 
         trace_builder.with_step("ExecutionEngine", "processed")
+        trace_builder.with_step("CapabilityExecutor", "resolved")
         trace_builder.with_step("ResponseEngine", "invoked")
         execution_trace = trace_builder.build()
 

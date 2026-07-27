@@ -1268,3 +1268,83 @@ convergent, with divergence now trending rather than merely tied. This
 ADR's Status remains `Proposed`, per standing instruction; only the
 Founder/Architect elevates it to `Accepted`, revises its text, or
 opens the follow-up package.
+
+## Empirical Finding (Package 034 - Capability Executor)
+
+`ICapabilityExecutor`, per the Founder's Package 034 work order, DOES
+inherit `IService` - read the same way "Register: ExecutionEngine.
+One new core service" (032) and "Register: ResponseEngine" (027)
+were: this package's own Bootstrap section says only "Register:
+CapabilityExecutor as a core service," with no further elaboration,
+but "core service" remains this codebase's own established shorthand
+for "adopts IService." Applying ADR-0002's criterion to `resolve()`
+independently, however, would NOT have suggested adoption on its own -
+the identical divergence Packages 018, 020, 021, 027, and 032 each
+exhibited. `resolve()` is a synchronous, read-only, in-memory lookup
+against an already-injected `ICapabilityRegistry` - one deterministic
+"does a Capability with this name exist" question, no external call,
+no dispatch to another live service beyond that single collaborator,
+no write, and no phase distinction it could plausibly be gated on.
+This makes `ICapabilityExecutor` the **seventh** IService adopter in
+this codebase with zero gated methods (after IntentRouter,
+KnowledgeGraph, ReasoningEngine, DecisionEngine, ResponseEngine, and
+ExecutionEngine), and the **sixth** case where an explicit instruction
+to adopt IService diverges from what ADR-0002's own criterion would
+independently conclude (after Packages 018, 020, 021, 027, and 032).
+
+A narrower point distinguishes this finding from the two immediately
+preceding it: unlike `ResponseEngine` (027) and `ExecutionEngine`
+(032), whose own zero-gated status rests on holding no constructor
+dependency whatsoever, `CapabilityExecutor` holds a genuine
+constructor dependency (`ICapabilityRegistry`) that `resolve()`
+genuinely calls on every invocation - architecturally the identical
+shape to `KnowledgeGraph` (018), `ReasoningEngine` (020), and
+`DecisionEngine` (021), each also zero-gated despite holding a real,
+called constructor dependency, since none of their own methods
+perform an effectful, stateful, or external operation a
+RUNNING/not-RUNNING distinction could meaningfully police. This
+finding therefore extends the "genuine dependency, still zero-gated"
+sub-pattern first identified at Package 018, not the "no dependency at
+all" sub-pattern Packages 027 and 032 each established.
+
+This finding also extends the divergent/convergent split Package 032's
+own finding tipped into its first run of two consecutive divergent
+findings: six divergent (018, 020, 021, 027, 032, 034) against three
+convergent (019, 025, 026) across nine directed-adoption data points
+(Package 033 contributed no new directed-adoption data point at all -
+`ICapabilityBuilder` does not inherit `IService`, and no other new
+adopter was introduced that package). Read as a single sequence, the
+pattern so far is 018-divergent, 019-convergent, 020-divergent,
+021-divergent, 025-convergent, 026-convergent, 027-divergent,
+032-divergent, 034-divergent - the first run of *three* consecutive
+divergent findings this ADR's own history has produced, extending
+Package 032's own first run of two. This further strengthens, without
+yet confirming outright, the reading that divergence - rather than
+convergence - is the more typical shape for this codebase's own
+explicitly-directed IService adoptions.
+
+Sixteen adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, DecisionEngine,
+CognitivePipeline, AgentService, ResponseEngine, ExecutionEngine, and
+now CapabilityExecutor), nine of which are genuinely gated (all but
+IntentRouter, KnowledgeGraph, ReasoningEngine, DecisionEngine,
+ResponseEngine, ExecutionEngine, and now CapabilityExecutor). Ten core
+services exist that do not implement `IService` at all (Configuration,
+the Logger, the Event Bus, the Service Registry, the Lifecycle
+Manager, Knowledge Service, Memory Service, Capability Registry,
+Plugin Manager, and Planner) - unchanged by this package, since
+`CapabilityExecutor` is a new core service distinct from the
+pre-existing Capability Registry.
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for sixteen adopters rather than fifteen. This
+package's finding, producing this ADR's own first run of three
+consecutive divergent findings, makes the case for formally separating
+"adoption" from "gating" as distinct questions somewhat stronger
+still - nine directed-adoption data points, six divergent and three
+convergent, with divergence now the clear majority shape rather than a
+narrow lean. This ADR's Status remains `Proposed`, per standing
+instruction; only the Founder/Architect elevates it to `Accepted`,
+revises its text, or opens the follow-up package.

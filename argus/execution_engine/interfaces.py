@@ -68,6 +68,27 @@ Arrives, But Nothing Is Gated On It:
     stored-but-unused dependency is not the same thing as a method
     gaining a gate, and ADR-0002's own criterion is about the latter.
 
+Architectural Note - Package 034 Amendment - The Dependency Is Now
+Used, But Still Nothing Is Gated:
+    Package 034's own explicit Integration instruction replaces
+    `ExecutionEngine.__init__()`'s own `capability_registry` parameter
+    with `capability_executor: ICapabilityExecutor` - "ExecutionEngine
+    now owns: CapabilityExecutor" - and, unlike Package 033's own
+    change, this dependency is genuinely called: `execute()` now sends
+    every Task to `capability_executor.resolve(task)` before placing
+    it into `completed_tasks` (see engine.py's own module docstring).
+    This still does not change `execute()`'s own gating status:
+    `resolve()` is itself a zero-gated ICapabilityExecutor method (see
+    argus/capability_executor/interfaces.py's own Architectural Note),
+    so calling it introduces no phase distinction `execute()` could
+    plausibly be gated on that did not already exist. `execute()`
+    remains callable in `CREATED`, `RUNNING`, or `STOPPED` alike, and
+    `IExecutionEngine` remains the sixth zero-gated IService adopter
+    and the fifth divergent ADR-0002 case, both facts established at
+    Package 032 and still unchanged by this package - only the
+    *dependency being used* changed, not whether a gate exists to use
+    it through.
+
 Responsibilities:
     - IExecutionResultBuilder: the contract implemented by
       ExecutionResultBuilder.
