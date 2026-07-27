@@ -1485,3 +1485,43 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **`owner`/`tags` are not settable through `WorkspaceBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `WorkspaceMetadata` construction.
 - **No transition logic on `WorkspaceStatus`.**
 - No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
+
+---
+
+## Package 038 - Goal Framework
+
+### Added
+
+- Added `argus/goal/` (`__init__.py`, `goal.py`, `metadata.py`, `builder.py`, `status.py`, `priority.py`, `interfaces.py`, `exceptions.py`) - the first-generation Goal domain, filling the one remaining gap in `Workspace -> Project -> Goal -> Plan -> Task`. "A Goal represents a desired outcome within a Project. Projects own Goals. Goals own Plans. Plans own Tasks."
+- `Goal` (`argus/goal/goal.py`) - immutable, `goal_id`, `name`, `description`, `status`, `priority`, `metadata` - six fields, one more than `Project`/`Workspace`, with `priority` as the genuinely new top-level field. Every field defaults - `Goal()` is always valid - directly mirroring `Project`'s and `Workspace`'s own shape (036, 037).
+- `GoalStatus` (`argus/goal/status.py`) - a plain `Enum` (not a `str` subclass), five members: `PLANNING`, `ACTIVE`, `PAUSED`, `COMPLETED`, `ABANDONED`. No transition logic. `PLANNING` is the default (the first-listed member), matching `ProjectStatus`'s own "not yet begun" meaning. `ABANDONED`, not `ARCHIVED`, is a deliberate literal reading of this package's own distinct member name.
+- `GoalPriority` (`argus/goal/priority.py`) - a plain `Enum`, explicitly NOT an `IntEnum` or other ordered variant - no ordering behavior, verified via `TypeError` on `<`/`>` comparisons. Four members: `LOW`, `NORMAL`, `HIGH`, `CRITICAL`. `NORMAL`, not `LOW`, is the default - the first genuine exception to this codebase's own "first-listed member is the default" convention, since defaulting an unprioritized Goal to `LOW` would falsely signal "known to be low-priority" rather than "priority never specified."
+- `GoalMetadata` (`argus/goal/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra` - the identical six-field composition `ProjectMetadata` (036) and `WorkspaceMetadata` (037) established, in the identical order. This package's own work order is the first to name "Project and Workspace" directly as the convention source, leaving no genuine composition or ordering tension to resolve.
+- `GoalBuilder` / `IGoalBuilder` (`argus/goal/builder.py`, `argus/goal/interfaces.py`) - "Builder is the only mutable object." `with_name()`/`with_description()`/`with_status()`/`with_priority()` are singular, overwritten not accumulated; `with_metadata(key, value)` accumulates into `GoalMetadata.extra` only. `with_priority()` IS implemented, unlike `with_owner()`/`with_tags()`, since this package's own Responsibilities list names "assign priority" as its own explicit bullet, structurally identical to "assign status" - the distinguishing factor is field location (top-level `Goal` field vs. `GoalMetadata` sub-field) combined with individual naming in the work order. No `with_goal_id()`, no `with_owner()`, no `with_tags()`.
+- `GoalError`, `InvalidGoalError` (`argus/goal/exceptions.py`).
+- Added `factory/packages/038_GOAL_FRAMEWORK.md`.
+- Added `tests/test_goal.py`, `tests/test_goal_builder.py`, `tests/test_goal_metadata.py`, `tests/test_goal_status.py`, `tests/test_goal_priority.py` - 92 new tests, entirely additive.
+
+### Changed
+
+- Nothing. This is the third consecutive package (after 036, 037) to modify zero pre-existing files - purely additive to `argus/goal/` and this package's own documentation.
+
+### Not Changed
+
+- **No changes to Workspace, Project, Plan, Task, Execution, Capability, Response, Runtime, or Bootstrap.** Confirmed via `git diff --stat` showing zero lines changed outside `argus/goal/` and the four documentation files.
+- **No ownership relationship to `Project` implemented, even minimally.** `Goal` is genuinely standalone in Version 1, with no field referencing `Project`, `Plan`, or `Task`.
+- **No ownership relationships implemented** - Plans, Success metrics, Milestones, Decisions, Deadlines, Risks, Dependencies are all documented as future relationships only.
+- **No persistence, no AI, no plugins, no automation** - "Goals are passive domain objects only."
+
+### Engineering Decision
+
+- `GoalMetadata`'s own field order follows `ProjectMetadata`'s and `WorkspaceMetadata`'s own established precedent (036, 037) - `created_at, version, correlation_id, owner, tags, extra` - directly named by this package's own work order as "the existing metadata conventions established by Project and Workspace."
+- `GoalPriority` deliberately breaks the "first-listed member is the default" convention, defaulting to `NORMAL` rather than `LOW`, to avoid misrepresenting "priority never specified" as "known to be low priority."
+- `with_priority()` is implemented on `GoalBuilder` despite `priority` being a genuinely new field (like `owner`/`tags` were new to `ProjectMetadata`), because the work order names "assign priority" as its own explicit Responsibilities bullet, unlike `owner`/`tags` which are folded under "assign metadata." See `factory/packages/038_GOAL_FRAMEWORK.md`'s own Engineering Decision section for the full reasoning.
+
+### Known Limitations
+
+- **`Goal` does not own `Plan` anywhere in this codebase** - the ownership chain `Workspace -> Project -> Goal -> Plan -> Task` is now fully populated with domain objects, but no ownership relationship between adjacent links is implemented.
+- **`owner`/`tags` are not settable through `GoalBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `GoalMetadata` construction.
+- **No transition logic on `GoalStatus`, no ordering behavior on `GoalPriority`.**
+- No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
