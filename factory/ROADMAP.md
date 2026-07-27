@@ -34,6 +34,7 @@
 - [x] Planning Session (PlanningSession, PlanningGoal, PlanningConstraint, PlanningMetadata, IPlanningSessionBuilder, PlanningSessionBuilder, Package 023 - transport object only; no new core service, no new events, no bootstrap changes)
 - [x] Planner Session Integration (Planner.plan_session(), Package 024 - additive PlanningSession entry point delegating to create_plan()/add_step(); no new core service, no new events, no bootstrap changes, full backward compatibility)
 - [x] Cognitive Pipeline (CognitivePipeline, ICognitivePipeline, PipelineRequest, PipelineResult, Package 025 - first-generation orchestrator wiring Conversation -> Cognitive Context -> Planning Session -> Planner.plan_session(); twenty-second core service, twelfth IService adopter, no new events, no reasoning/planning behavior change)
+- [x] Agent Session (AgentSession, AgentRequest, AgentResponse, IAgentService, AgentService, Package 026 - first-generation user-facing orchestration layer wiring User -> Agent Session -> Cognitive Pipeline; twenty-third core service, thirteenth IService adopter, no new events, wraps PipelineResult only - no natural language, no execution)
 
 ---
 

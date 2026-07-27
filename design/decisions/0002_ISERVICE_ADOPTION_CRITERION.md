@@ -1007,3 +1007,88 @@ divergent, two convergent) instead of four (three divergent, one
 convergent). This ADR's Status remains `Proposed`, per standing
 instruction; only the Founder/Architect elevates it to `Accepted`,
 revises its text, or opens the follow-up package.
+
+---
+
+## Empirical Finding (Package 026 - Agent Session)
+
+`IAgentService`, per the Founder's Package 026 work order, DOES
+inherit `IService` - once again an explicit instruction ("Register
+AgentService as the next core service"), read the same way
+`ICognitivePipeline`'s own "Register the Cognitive Pipeline as a core
+service" instruction was read in Package 025 - "core service" is this
+codebase's own established shorthand for "adopts IService," further
+confirmed here by this package's own Testing section naming "lifecycle
+behavior" as an explicit test category. Applying ADR-0002's criterion
+independently to `AgentService`'s one public method, `run()`, would
+have suggested adoption on its own too - the same convergence Package
+019's Memory Integration and Package 025's Cognitive Pipeline each
+exhibited, and the direct opposite of Packages 018, 020, and 021's
+divergent pattern. `run()` validates an `AgentRequest`, builds a
+`PipelineRequest` from it, and invokes a live, injected
+`ICognitivePipeline`'s own `run()` - genuinely effectful, single-step
+delegation to a live downstream service, architecturally the same
+shape that made `CognitivePipeline.run()` itself (Package 025)
+genuinely gated one layer below. `AgentService` therefore gates its
+sole public method (`run()` raises `AgentError` unless `status()` is
+`RUNNING`) - making it the **third** IService adopter in this
+codebase, after Memory Integration (Package 019) and the Cognitive
+Pipeline (Package 025), where explicit instruction-to-adopt and
+ADR-0002's criterion applied independently arrive at the same answer,
+rather than diverging as in Packages 018, 020, and 021.
+
+This finding also extends the running tally three consecutive
+convergent findings now hold at the top of this ADR's own history:
+Packages 018, 020, and 021 diverged; Packages 019, 025, and now 026
+converged. Read across all six directed-adoption data points to date,
+the picture is now an even three divergent, three convergent - the
+first point in this ADR's own history where the two shapes are
+exactly balanced, rather than one outnumbering the other. This does
+not settle which shape is "typical" any more than five points did,
+but the balance itself is worth recording: it weakens, for the first
+time, any reading of the earlier data as a mere run of divergent
+cases followed by rare convergent exceptions, and strengthens the
+recommendation - unchanged in substance since Package 019's own
+finding - that "was IService adoption instructed" and "does the
+criterion's own gating logic agree" are best treated as genuinely
+independent questions in any future revision of this ADR's text.
+
+A related, narrower point specific to this package, directly
+mirroring Package 025's own equivalent observation one layer below:
+`AgentService` is the second `IService` adopter in this codebase
+(after `CognitivePipeline`, Package 025) to hold no `IEventBus`
+reference at all. "No event publication" is explicit in this
+package's own AgentService Responsibilities, and Version 1 gives it no
+work that would require one - the one event any given `run()` call
+might eventually cause (`PLAN_CREATED`, `PLAN_UPDATED`) still fires
+from inside `Planner.plan_session()`'s own pre-existing delegated
+calls, two layers below `AgentService` itself. This is a
+dependency-shape observation, not an adoption-criterion question, and
+does not itself bear on ADR-0002 - recorded here only because it was
+discovered in the course of this same package's IService integration
+work, and because it is now the second consecutive new-service package
+to exhibit this exact shape, suggesting "orchestration-only, no
+IEventBus" may be becoming this codebase's own default pattern for any
+future package whose entire contribution is delegating to an
+already-instrumented downstream service.
+
+Thirteen adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, DecisionEngine,
+CognitivePipeline, and now AgentService), nine of which are genuinely
+gated (all but IntentRouter, KnowledgeGraph, ReasoningEngine, and
+DecisionEngine). Ten core services exist that do not implement
+`IService` at all (Configuration, the Logger, the Event Bus, the
+Service Registry, the Lifecycle Manager, Knowledge Service, Memory
+Service, Capability Registry, Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for thirteen adopters rather than twelve. This
+package's finding, read alongside Packages 018-021 and 025, makes the
+strongest case yet - now six directed-adoption data points, evenly
+split three divergent and three convergent - that ADR-0002 could
+usefully be revised to formally separate "adoption" from "gating" as
+distinct questions. This ADR's Status remains `Proposed`, per standing
+instruction; only the Founder/Architect elevates it to `Accepted`,
+revises its text, or opens the follow-up package.

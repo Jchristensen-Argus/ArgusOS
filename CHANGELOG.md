@@ -1017,3 +1017,43 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `CognitivePipeline` holds no `IEventBus` reference - by design, since it has nothing of its own to publish.
 - No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
 - The pipeline is not yet invoked automatically by anything - it is available to any caller holding a `PipelineRequest`, but no automatic trigger (a Connector, a Scheduler tick, or similar) exists yet.
+
+## Package 026 - Agent Session
+
+### Added
+
+- Added `argus/agent/` (`__init__.py`, `session.py`, `request.py`, `response.py`, `interfaces.py`, `exceptions.py`, and `service.py` - see "Not Changed"/documentation for the one file-naming deviation from this package's own listed file names) - the first-generation Agent Session, orchestrating the existing Cognitive Pipeline on behalf of a user-facing interaction: `User -> Agent Session -> Pipeline -> Conversation -> ... -> Planner -> Validated Plan`. "An Agent Session represents an ongoing interaction between a user and Argus. It owns conversation continuity. It orchestrates the Cognitive Pipeline. It does not perform reasoning. It does not perform planning. It does not perform execution."
+- `AgentSession` (`argus/agent/session.py`) - immutable, owns one `ConversationSession` directly (`conversation`, `session_id`, `metadata`). "The session owns one Conversation instance. The Conversation remains the authoritative conversation model."
+- `AgentRequest` (`argus/agent/request.py`) - immutable, references an `AgentSession` and separately carries the `ConversationSession` this particular request concerns (`session`, `conversation`, `request_id`, `metadata`).
+- `AgentResponse` (`argus/agent/response.py`) - immutable, `session`, `pipeline_result`, `response_id`, `metadata`. "Do not generate natural-language responses. Do not perform execution. Wrap the PipelineResult only."
+- `IAgentService` (`argus/agent/interfaces.py`) - inherits `IService`, per explicit instruction; declares one abstract method, `run(request: AgentRequest) -> AgentResponse`.
+- `AgentService` (`argus/agent/service.py`) - implements `IAgentService`. `run()` performs exactly four steps: accept the `AgentRequest`, build a `PipelineRequest` from it, invoke `CognitivePipeline.run()`, return the `AgentResponse`. Depends on exactly one injected collaborator, `ICognitivePipeline`; holds no `IEventBus` reference at all, the same "nothing of its own to publish" shape `CognitivePipeline` (Package 025) already established one layer below.
+- `AgentError`, `InvalidAgentRequestError`, `AgentExecutionError` (`argus/agent/exceptions.py`) - `InvalidAgentRequestError` for a non-`AgentRequest` argument, a `session` that is not an `AgentSession`, or a `conversation` that is not a `ConversationSession`; `AgentExecutionError` wraps (`raise ... from error`) any exception `CognitivePipeline.run()` raises, the same "wrap a delegate's own exception" shape `PipelineExecutionError` (Package 025) established one layer below, which itself mirrors `RuleEvaluationError` (Package 021); `AgentError` directly, for an invalid `IService` lifecycle transition or calling `run()` while not `RUNNING`.
+- Metadata propagation: every key in `AgentRequest.metadata`, plus `agent_request_id` and `agent_session_id`, is carried into the built `PipelineRequest.metadata` - which the Cognitive Pipeline itself then propagates further into the built `CognitiveContext.metadata.extra`, the built `PlanningSession.metadata.extra`, and `PipelineResult.metadata` - and is also recorded directly in `AgentResponse.metadata`.
+- Added `factory/packages/026_AGENT_SESSION.md`.
+- Added `tests/test_agent_session.py` (12 new tests), `tests/test_agent_request.py` (12 new tests), `tests/test_agent_response.py` (11 new tests), `tests/test_agent_service.py` (36 new tests) - covering lifecycle gating, empty/populated sessions, pipeline invocation, immutable objects, dependency failures, response wrapping, and metadata propagation.
+- Added 3 new tests to `tests/test_bootstrap.py` (`agent_service` registered in the container; not started by `bootstrap()` itself; a full end-to-end `initialize()`/`start()`/`run()`/`stop()` call against the real bootstrapped `CognitivePipeline`).
+
+### Changed
+
+- `argus/bootstrap.py`: registered `AgentService` as the twenty-third core service and thirteenth `IService` adopter - "the second new runtime service since Package 021" (after the Cognitive Pipeline, Package 025). Constructed immediately after `cognitive_pipeline`, depending on `cognitive_pipeline` alone (already constructed earlier in the sequence). Startup Sequence gained a new step 24 ("Construct the Agent Service"); the prior steps 24/25 renumbered to 25/26; `_register_core_services()` gained an `agent_service: IAgentService` parameter and the twenty-third entry in its `core_services` tuple.
+- `tests/test_bootstrap.py` / `argus/tests/test_bootstrap.py`: `CORE_SERVICE_NAMES` synced to include `"agent_service"`, per the standing Package 011 rule for the duplicate tree.
+
+### Not Changed
+
+- **`argus/runtime/`, `argus/planner/`, `argus/pipeline/`, `argus/decision/`, `argus/reasoning/`, `argus/context/`, `argus/planning/`, and `argus/conversation/` are all unchanged** - "Runtime: No changes. Planner: No changes. Pipeline: No changes. Conversation: No changes."
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes. Reuse existing behavior."
+- No AI or LLM integration, no execution, no persistence - "Agent Service is an orchestration layer only."
+- **File naming deviates from this package's own listed file names**: the work order's "New Package" section lists six files for `argus/agent/` with no dedicated file for `AgentService`'s own concrete implementation (unlike Package 025's own listing, which named `pipeline.py` explicitly). Resolved by adding one additional file, `service.py`, not named in the work order, rather than placing the concrete `AgentService` inside `interfaces.py` - preserving this codebase's own unbroken "interfaces.py holds an ABC only, never a concrete class" convention. See `factory/packages/026_AGENT_SESSION.md` and `argus/agent/service.py`'s own module docstring for the full reasoning.
+
+### ADR Update
+
+- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` gained an Empirical Finding for Package 026. `IAgentService` inheriting `IService` was again an explicit instruction, but ADR-0002's criterion, applied independently to `run()`'s effectful delegation to a live `CognitivePipeline`, would have suggested adoption on its own too - making `AgentService` the **third** convergent case in this codebase, after Memory Integration (Package 019) and the Cognitive Pipeline (Package 025), and bringing the running tally to an even three divergent, three convergent across six directed-adoption data points - the first point in this ADR's history where the two shapes are exactly balanced.
+
+### Known Limitations
+
+- `AgentResponse` wraps the `PipelineResult` only - no natural-language response is generated anywhere in this package; a caller wanting one must build it from `pipeline_result` themselves, in a future package explicitly scoped to do so.
+- `AgentRequest.conversation` is never cross-validated against `request.session.conversation` - the two are independent fields, matching this codebase's own "no validation beyond isinstance checks" restraint elsewhere.
+- `AgentService` holds no `IEventBus` reference - by design, since it has nothing of its own to publish.
+- No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
+- The Agent Session is not yet invoked automatically by anything - it is available to any caller holding an `AgentRequest`, but no automatic trigger (a Connector, a Scheduler tick, or similar) exists yet.
