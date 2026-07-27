@@ -1057,3 +1057,45 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `AgentService` holds no `IEventBus` reference - by design, since it has nothing of its own to publish.
 - No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
 - The Agent Session is not yet invoked automatically by anything - it is available to any caller holding an `AgentRequest`, but no automatic trigger (a Connector, a Scheduler tick, or similar) exists yet.
+
+## Package 027 - Response Engine
+
+### Added
+
+- Added `argus/response/` (`__init__.py`, `engine.py`, `response.py`, `metadata.py`, `interfaces.py`, `exceptions.py`) - the first-generation Response Engine, converting a validated Plan into a standardized Response: `User -> Agent Service -> Cognitive Pipeline -> ... -> Validated Plan -> Response Engine -> Response`. "The Response Engine converts a validated Plan into a structured response object. It does not generate AI text. It does not execute plans. It does not communicate with the user interface. Its responsibility is to transform cognitive output into a standardized response contract."
+- `Response` (`argus/response/response.py`) - immutable, `plan`, `response_id`, `status` (copied from `plan.status`), `metadata` (a `ResponseMetadata`, not a bare mapping). "Do not include natural-language text. Do not include markdown. Do not include rendering. The Response object represents a completed cognitive result only."
+- `ResponseMetadata` (`argus/response/metadata.py`) - immutable, mirrors `ContextMetadata`/`PlanningMetadata`'s shape (`version`, `correlation_id`, `extra`), with one explicit field-name deviation the work order itself specifies: `timestamp`, not `created_at`.
+- `IResponseEngine` (`argus/response/interfaces.py`) - inherits `IService`, per explicit instruction/Testing-category reading; declares one abstract method, `build_response(plan: Plan) -> Response`.
+- `ResponseEngine` (`argus/response/engine.py`) - implements `IResponseEngine`. `build_response()` performs exactly three steps: validate the Plan reference, construct a Response (copying `plan.status` and `plan.metadata`), return it. Takes **no constructor dependency at all** - the first core service in this codebase for which that is true, since "ResponseEngine may depend only on: Plan" and `Plan` is a per-call argument, never injected. `build_response()` is never gated on the engine's own lifecycle state, mirroring `KnowledgeGraph`/`ReasoningEngine`/`DecisionEngine`'s identical "adopts IService, gates nothing" shape.
+- `ResponseError`, `InvalidPlanReferenceError` (`argus/response/exceptions.py`) - `InvalidPlanReferenceError` for a non-`Plan` argument to `build_response()`; `ResponseError` directly, for an invalid `IService` lifecycle transition. No "wrap a delegate's own exception" subtype - `ResponseEngine` has no delegate to fail on.
+- Metadata propagation: `build_response()` copies `dict(plan.metadata)` into the returned `Response.metadata.extra` unchanged - the only metadata source available to `ResponseEngine`, which never sees the original `AgentRequest`/`PipelineRequest` metadata (that chain terminates at `PipelineResult.metadata`, Package 025).
+- Added `factory/packages/027_RESPONSE_ENGINE.md`.
+- Added `tests/test_response.py` (12 new tests), `tests/test_response_metadata.py` (10 new tests), `tests/test_response_engine.py` (26 new tests) - covering identity, lifecycle, ungated behavior, valid/invalid plans, immutability, metadata propagation, and the "no dependency to fail on" shape.
+- Added 3 new tests to `tests/test_bootstrap.py` (`response_engine` registered in the container; not started by `bootstrap()` itself; `build_response()` works against the real bootstrapped instance even while unstarted, demonstrating the ungated behavior directly).
+
+### Changed
+
+- **`argus/agent/response.py`** - `AgentResponse.pipeline_result: PipelineResult` renamed and retyped to `AgentResponse.response: Response`, per this package's own explicit "Agent Integration" instruction ("Return AgentResponse now containing: Response instead of: PipelineResult"). A breaking field rename, not an additive change - `PipelineResult` is no longer held anywhere on `AgentResponse`.
+- **`argus/agent/service.py`** - `AgentService.__init__()` gained a second required dependency, `response_engine: IResponseEngine`. `run()` gained a fifth step between the prior "invoke `cognitive_pipeline.run()`" and "return `AgentResponse`" steps: invoke `response_engine.build_response(pipeline_result.plan)`, wrapping any exception as `AgentExecutionError` (the same shape used for `cognitive_pipeline.run()` failures).
+- **`argus/agent/interfaces.py`** - `IAgentService.run()`'s own docstring updated to describe the five-step sequence and both delegated-call failure paths; no change to the abstract method's own signature.
+- **`argus/bootstrap.py`**: registered `ResponseEngine` as the twenty-fourth core service and fourteenth `IService` adopter (fifth zero-gated). Constructed immediately after `cognitive_pipeline` and immediately before `agent_service`, per the explicit "Planner -> Pipeline -> Response Engine -> Agent Service" dependency order. `AgentService`'s own construction updated to pass `response_engine=response_engine`. Startup Sequence gained a new step 24 ("Construct the Response Engine"); the prior Agent Service/registration/application steps renumbered 25/26/27; `_register_core_services()` gained a `response_engine: IResponseEngine` parameter and the twenty-fourth entry in its `core_services` tuple.
+- `tests/test_bootstrap.py` / `argus/tests/test_bootstrap.py`: `CORE_SERVICE_NAMES` synced to include `"response_engine"`, per the standing Package 011 rule for the duplicate tree; the pre-existing Package 026 end-to-end test updated for the `response`/`pipeline_result` field rename.
+
+### Not Changed
+
+- **`argus/pipeline/` is completely unchanged** - "The Pipeline remains completely unchanged," confirmed via `git diff --stat -- argus/pipeline` showing zero lines changed.
+- **`argus/runtime/`, `argus/planner/`, `argus/planning/`, `argus/context/`, `argus/conversation/`, `argus/memory/`, `argus/memory_integration/`, `argus/knowledge/`, `argus/knowledge_graph/`, `argus/decision/`, `argus/reasoning/` are all unchanged** - "Runtime: No changes. Pipeline: No changes. Planner: No changes. Memory: No changes. Knowledge: No changes."
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes."
+- No AI or LLM integration, no formatting, no rendering, no persistence - "The Response Engine is a transformation layer only."
+
+### ADR Update
+
+- `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` gained an Empirical Finding for Package 027. `IResponseEngine` inheriting `IService` was again read from the "core service" + "lifecycle" Testing-category convention, but ADR-0002's criterion, applied independently to `build_response()`'s purely synchronous, in-memory, no-collaborator transformation, would NOT have suggested adoption - the **fourth** divergent case (after Packages 018, 020, 021), breaking the exact three-divergent/three-convergent tie Package 026's own finding established. `ResponseEngine` is also the first core service in this codebase's history with a fully empty constructor.
+
+### Known Limitations
+
+- `Response` wraps the `Plan` only - no natural-language text, markdown, or rendering anywhere in this package; a caller wanting any of those must build it from `response.plan` themselves, in a future package explicitly scoped to do so.
+- `ResponseMetadata.extra` only ever reflects `plan.metadata` (`planning_session_id`, `cognitive_context_id`, `constraints`) - the original `AgentRequest`/`PipelineRequest` metadata (`agent_request_id`, caller-supplied keys) is not visible inside it, since `ResponseEngine` never sees that data at all; those keys remain directly visible on `AgentResponse.metadata` itself, one layer up.
+- `ResponseEngine.build_response()` is never gated - callers may invoke it at any lifecycle state, including before `initialize()`/`start()` are ever called.
+- No AI, no optimization, no persistence, no concurrency - unchanged from every prior package in this phase.
+- The Response Engine is not yet invoked by anything except `AgentService` - no other caller exists yet.

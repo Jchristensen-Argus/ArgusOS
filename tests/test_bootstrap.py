@@ -9,6 +9,7 @@ from argus.connectors import ConnectorManager, IConnectorManager
 from argus.knowledge_graph import IKnowledgeGraph, KnowledgeGraph
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.agent import IAgentService, AgentService, AgentSession, AgentRequest
+from argus.response import IResponseEngine, ResponseEngine
 from argus.pipeline import ICognitivePipeline, CognitivePipeline, PipelineRequest
 from argus.reasoning import IReasoningEngine, ReasoningEngine
 from argus.decision import IDecisionEngine, DecisionEngine
@@ -49,6 +50,7 @@ CORE_SERVICE_NAMES = (
     "agent_runtime",
     "connector_manager",
     "cognitive_pipeline",
+    "response_engine",
     "agent_service",
 )
 
@@ -688,6 +690,55 @@ class BootstrapTests(unittest.TestCase):
         finally:
             application.shutdown()
 
+    def test_bootstrap_registers_response_engine_in_container(self):
+        application = bootstrap()
+
+        try:
+            self.assertTrue(application.container.has("response_engine"))
+            response_engine = application.container.resolve("response_engine")
+            self.assertIsInstance(response_engine, IResponseEngine)
+            self.assertIsInstance(response_engine, ResponseEngine)
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_response_engine_is_not_started(self):
+        application = bootstrap()
+
+        try:
+            response_engine = application.container.resolve("response_engine")
+            self.assertEqual(response_engine.status(), LifecycleState.CREATED)
+            self.assertEqual(
+                application.container.resolve("lifecycle_manager").status("response_engine"),
+                LifecycleState.REGISTERED,
+            )
+        finally:
+            application.shutdown()
+
+    def test_bootstrap_response_engine_builds_response_even_while_unstarted(self):
+        # Unlike CognitivePipeline/AgentService, ResponseEngine's
+        # build_response() is never gated (see
+        # argus/response/interfaces.py's own Architectural Note) - so
+        # this, unlike the Cognitive Pipeline's and Agent Service's
+        # own end-to-end bootstrap tests, deliberately does NOT call
+        # initialize()/start() first, to directly demonstrate the
+        # ungated behavior against the real bootstrapped instance.
+        from argus.intent import Intent, IntentType
+        from argus.planner import Plan
+
+        application = bootstrap()
+
+        try:
+            response_engine = application.container.resolve("response_engine")
+            self.assertEqual(response_engine.status(), LifecycleState.CREATED)
+
+            plan = Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
+            response = response_engine.build_response(plan)
+
+            self.assertIs(response.plan, plan)
+            self.assertEqual(response.status, plan.status)
+        finally:
+            application.shutdown()
+
     def test_bootstrap_registers_agent_service_in_container(self):
         application = bootstrap()
 
@@ -738,8 +789,8 @@ class BootstrapTests(unittest.TestCase):
                     AgentRequest(session=session, conversation=session.conversation)
                 )
                 self.assertIs(response.session, session)
-                self.assertIs(response.pipeline_result.conversation, session.conversation)
-                self.assertEqual(response.pipeline_result.plan.steps, ())
+                self.assertEqual(response.response.plan.steps, ())
+                self.assertEqual(response.response.status, PlanStatus.CREATED)
                 self.assertEqual(
                     response.metadata["agent_session_id"], session.session_id
                 )

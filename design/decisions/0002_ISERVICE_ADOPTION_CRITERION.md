@@ -1092,3 +1092,103 @@ usefully be revised to formally separate "adoption" from "gating" as
 distinct questions. This ADR's Status remains `Proposed`, per standing
 instruction; only the Founder/Architect elevates it to `Accepted`,
 revises its text, or opens the follow-up package.
+
+---
+
+## Empirical Finding (Package 027 - Response Engine)
+
+`IResponseEngine`, per the Founder's Package 027 work order, DOES
+inherit `IService` - once again read the same way `ICognitivePipeline`'s
+(Package 025) and `IAgentService`'s (Package 026) own "Register ... as
+a core service" instructions were read: this package's own Bootstrap
+section says only "Register: ResponseEngine," less explicit than
+either of those two, but its own Testing section names "lifecycle" as
+an explicit verification category, the same tell that confirmed the
+reading for Package 026. Applying ADR-0002's criterion to
+`build_response()` independently, however, would NOT have suggested
+adoption on its own - the same divergence Packages 018, 020, and 021
+each exhibited, and the direct opposite of Packages 019, 025, and
+026's convergent pattern. `build_response()` is a synchronous,
+in-memory transformation of a `Plan` the caller already supplies - no
+external call, no dispatch to another live service, and no phase
+distinction it could plausibly be gated on, since "ResponseEngine may
+depend only on: Plan" leaves it with no live collaborator to gate
+access to in the first place. This is architecturally the same shape
+as `KnowledgeGraph` (Package 018), `ReasoningEngine` (Package 020),
+and `DecisionEngine` (Package 021) - each explicitly instructed to
+adopt IService, each with no method gated on the RUNNING state - and
+takes that shape one step further: unlike those three, which each
+hold at least one constructor-injected collaborator (an `IEventBus`,
+in every case) even though their own domain methods never call into
+it for gating purposes, `ResponseEngine.__init__()` takes no
+constructor dependency at all - the first core service in this
+codebase for which that is true. `ResponseEngine` therefore implements
+the full IService lifecycle boilerplate
+(`initialize()`/`start()`/`stop()`/`status()`) but gates nothing -
+making it the **fifth** IService adopter in this codebase with zero
+gated methods (after IntentRouter, KnowledgeGraph, ReasoningEngine,
+and DecisionEngine), and the **fourth** case where an explicit
+instruction to adopt IService diverges from what ADR-0002's own
+criterion would independently conclude (after Packages 018, 020, and
+021).
+
+This finding also breaks the exact three-divergent/three-convergent
+tie Package 026's own finding established - the first point in this
+ADR's own history where the two shapes were perfectly balanced,
+across six directed-adoption data points. Package 027 tips the
+balance back toward divergent: four divergent (018, 020, 021, 027)
+against three convergent (019, 025, 026) across seven data points.
+Read as a single sequence, the pattern so far is 018-divergent,
+019-convergent, 020-divergent, 021-divergent, 025-convergent,
+026-convergent, 027-divergent - no run longer than two in either
+direction, and no obvious alternation either. This continues to
+resist any confident claim about which shape is "typical" for a
+directed IService adoption in this codebase, which is itself the
+core of the recommendation every finding since Package 019 has
+repeated: "was adoption instructed" and "does the criterion agree"
+are better modeled as two independent questions than as one combined
+decision.
+
+A related, narrower point specific to this package: `ResponseEngine`
+is the first core service in this codebase's own history - adopter or
+not - with a fully empty constructor. Every other core service,
+including every zero-gated `IService` adopter before it
+(`IntentRouter`, `KnowledgeGraph`, `ReasoningEngine`, `DecisionEngine`),
+takes at least one constructor dependency, typically an `IEventBus`,
+even when that dependency is never used for gating. `ResponseEngine`
+has no dependency of any kind - not because its own methods happen
+not to need one for gating, but because its own Dependency Rules
+("ResponseEngine may depend only on: Plan") make `Plan` a per-call
+argument rather than a constructor-injected collaborator, the first
+time in this codebase a core service's *sole* permitted dependency is
+something that arrives with every call rather than something wired in
+once at construction. This is a dependency-shape observation, not an
+adoption-criterion question, and does not itself bear on ADR-0002 -
+recorded here only because it was discovered in the course of this
+same package's IService integration work, and because it is a genuine
+first for this codebase's own core-service population.
+
+Fourteen adopters now exist (Scheduler, IntentRouter, WorkflowEngine,
+ConversationManager, IntentDispatcher, AgentRuntime, ConnectorManager,
+KnowledgeGraph, MemoryIntegration, ReasoningEngine, DecisionEngine,
+CognitivePipeline, AgentService, and now ResponseEngine), nine of
+which are genuinely gated (all but IntentRouter, KnowledgeGraph,
+ReasoningEngine, DecisionEngine, and now ResponseEngine). Ten core
+services exist that do not implement `IService` at all (Configuration,
+the Logger, the Event Bus, the Service Registry, the Lifecycle
+Manager, Knowledge Service, Memory Service, Capability Registry,
+Plugin Manager, and Planner).
+
+**Recommendation:** unchanged in substance. A dedicated architectural
+package to resolve `IService.status()`'s duplication is still
+warranted, now for fourteen adopters rather than thirteen. This
+package's finding, breaking the first-ever divergent/convergent tie
+this ADR's own history produced, makes the strongest case yet - seven
+directed-adoption data points, four divergent and three convergent,
+no discernible pattern to when each shape occurs - that ADR-0002
+could usefully be revised to formally separate "adoption" from
+"gating" as distinct questions, rather than continuing to treat each
+new package's own combination as a fresh, independent surprise. This
+ADR's Status remains `Proposed`, per standing instruction; only the
+Founder/Architect elevates it to `Accepted`, revises its text, or
+opens the follow-up package.

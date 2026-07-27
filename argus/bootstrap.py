@@ -23,8 +23,9 @@ Purpose:
     factory/packages/019_MEMORY_INTEGRATION.md,
     factory/packages/020_REASONING_ENGINE.md,
     factory/packages/021_DECISION_ENGINE.md,
-    factory/packages/025_COGNITIVE_PIPELINE.md, and
-    factory/packages/026_AGENT_SESSION.md.
+    factory/packages/025_COGNITIVE_PIPELINE.md,
+    factory/packages/026_AGENT_SESSION.md, and
+    factory/packages/027_RESPONSE_ENGINE.md.
 
 Startup Sequence:
     1. Create the dependency injection Container.
@@ -452,41 +453,78 @@ Startup Sequence:
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    24. Construct the Agent Service (depends on the Cognitive
-        Pipeline only) and register it with the Container, per
-        Package 026. Bootstrap is the only place that constructs
-        AgentService directly; every other subsystem must resolve it
-        from the Container. Constructed immediately after the
-        Cognitive Pipeline, per the Bootstrap section's explicit
-        dependency order ("Planner -> Pipeline -> Agent Service") -
-        like the Cognitive Pipeline's own placement (Package 025),
-        this ordering IS dependency-driven: AgentService genuinely
-        needs a live ICognitivePipeline reference at construction, and
-        nothing else - "AgentService may depend on: ICognitivePipeline.
-        AgentService shall not depend on: Planner, Reasoning Engine,
-        Decision Engine, Builders, Bootstrap internals." This is the
-        second new runtime service since Package 021 (Packages 022-023
+    24. Construct the Response Engine (depends on nothing) and
+        register it with the Container, per Package 027. Bootstrap is
+        the only place that constructs ResponseEngine directly; every
+        other subsystem must resolve it from the Container.
+        Constructed immediately after the Cognitive Pipeline and
+        immediately before the Agent Service, per the Bootstrap
+        section's explicit dependency order ("Planner -> Pipeline ->
+        Response Engine -> Agent Service") - unlike every other core
+        service constructed so far, this placement is dependency-
+        driven in the weakest possible sense: nothing about
+        ResponseEngine's own construction actually requires anything
+        constructed before it ("ResponseEngine may depend only on:
+        Plan," and Plan is a per-call argument to build_response(),
+        never a constructor dependency) - it is placed here solely
+        because the Agent Service (step 25) needs a live
+        IResponseEngine reference at its own construction, and the
+        explicit dependency order names this position. This is the
+        third new runtime service since Package 021 (Packages 022-023
         deliberately introduced no new core service at all; Package
-        024 modified an existing one). AgentService DOES implement
-        IService, with run() genuinely gated on the service's own
-        RUNNING state - see argus/agent/interfaces.py's Architectural
-        Note and ADR-0002's newly appended Empirical Finding for this
-        package. Like every other IService adopter, it is registered
-        only (LifecycleState.REGISTERED) here - its own initialize()/
+        024 modified an existing one). ResponseEngine DOES implement
+        IService, per the same "core service" + "lifecycle" Testing
+        category reading already applied to the Cognitive Pipeline
+        (Package 025) and the Agent Service (Package 026) - but
+        unlike either of those two, build_response() is NOT gated on
+        the engine's own RUNNING state, mirroring the Knowledge Graph
+        (Package 018), the Reasoning Engine (Package 020), and the
+        Decision Engine (Package 021) - see
+        argus/response/interfaces.py's Architectural Note and
+        ADR-0002's newly appended Empirical Finding for this package.
+        Like every other IService adopter, it is registered only
+        (LifecycleState.REGISTERED) here - its own initialize()/
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    25. Register the twenty-three core services (Configuration, Logger,
+    25. Construct the Agent Service (depends on the Cognitive
+        Pipeline and, as of Package 027, the Response Engine) and
+        register it with the Container, per Packages 026 and 027.
+        Bootstrap is the only place that constructs AgentService
+        directly; every other subsystem must resolve it from the
+        Container. Constructed immediately after the Response Engine,
+        per the Bootstrap section's explicit dependency order
+        ("Planner -> Pipeline -> Response Engine -> Agent Service") -
+        like the Cognitive Pipeline's own placement (Package 025),
+        this ordering IS dependency-driven: AgentService genuinely
+        needs both a live ICognitivePipeline reference and, as of this
+        package, a live IResponseEngine reference at construction, and
+        nothing else - "AgentService may depend on: ICognitivePipeline.
+        AgentService shall not depend on: Planner, Reasoning Engine,
+        Decision Engine, Builders, Bootstrap internals" (Package 026),
+        extended by Package 027's own "After pipeline.run() invoke
+        response_engine.build_response()" instruction. AgentService
+        DOES implement IService, with run() genuinely gated on the
+        service's own RUNNING state - see argus/agent/interfaces.py's
+        Architectural Note and ADR-0002's newly appended Empirical
+        Finding for Package 026 (unaffected by this package's own
+        amendment). Like every other IService adopter, it is
+        registered only (LifecycleState.REGISTERED) here - its own
+        initialize()/start() are deliberately NOT called by this
+        package, for the same divergence-avoidance reasoning recorded
+        in ADR-0002 and already applied to every prior adopter.
+    26. Register the twenty-four core services (Configuration, Logger,
         Event Bus, Service Registry, Lifecycle Manager, Knowledge
         Service, Memory Service, Scheduler, Intent Router, Workflow
         Engine, Conversation Manager, Capability Registry, Intent
         Dispatcher, Plugin Manager, Planner, Knowledge Graph, Memory
         Integration, Reasoning Engine, Decision Engine, Agent Runtime,
-        Connector Manager, Cognitive Pipeline, Agent Service) in the
-        Service Registry (identity/descriptive data only) and in the
-        Lifecycle Manager, where each enters LifecycleState.REGISTERED.
-        None of them are initialized or started by this package.
-    26. Construct and start the Application.
+        Connector Manager, Cognitive Pipeline, Response Engine, Agent
+        Service) in the Service Registry (identity/descriptive data
+        only) and in the Lifecycle Manager, where each enters
+        LifecycleState.REGISTERED. None of them are initialized or
+        started by this package.
+    27. Construct and start the Application.
 
 Scope:
     This module implements only application startup infrastructure.
@@ -543,6 +581,7 @@ from argus.logging_service import get_logger, initialize_logging
 from argus.memory import IMemoryService, JSONMemoryStorage, MemoryService
 from argus.memory_integration import IMemoryIntegration, MemoryIntegration
 from argus.agent import AgentService, IAgentService
+from argus.response import IResponseEngine, ResponseEngine
 from argus.pipeline import CognitivePipeline, ICognitivePipeline
 from argus.planner import IPlanner, Planner
 from argus.plugins import IPluginManager, Plugin, PluginManager
@@ -707,7 +746,12 @@ def bootstrap() -> Application:
     cognitive_pipeline = CognitivePipeline(planner=planner)
     container.register("cognitive_pipeline", cognitive_pipeline)
 
-    agent_service = AgentService(cognitive_pipeline=cognitive_pipeline)
+    response_engine = ResponseEngine()
+    container.register("response_engine", response_engine)
+
+    agent_service = AgentService(
+        cognitive_pipeline=cognitive_pipeline, response_engine=response_engine
+    )
     container.register("agent_service", agent_service)
 
     _register_core_services(
@@ -733,6 +777,7 @@ def bootstrap() -> Application:
         agent_runtime=agent_runtime,
         connector_manager=connector_manager,
         cognitive_pipeline=cognitive_pipeline,
+        response_engine=response_engine,
         agent_service=agent_service,
     )
 
@@ -766,6 +811,7 @@ def _register_core_services(
     agent_runtime: IAgentRuntime,
     connector_manager: IConnectorManager,
     cognitive_pipeline: ICognitivePipeline,
+    response_engine: IResponseEngine,
     agent_service: IAgentService,
 ) -> None:
     """
@@ -784,31 +830,36 @@ def _register_core_services(
     Conversation Manager, the Capability Registry, the Intent
     Dispatcher, the Plugin Manager, the Planner, the Knowledge Graph,
     Memory Integration, the Reasoning Engine, the Decision Engine, the
-    Agent Runtime, the Connector Manager, the Cognitive Pipeline, and
-    the Agent Service is recorded as a ServiceDescriptor (identity and
-    descriptive data only, no runtime state) in the Service Registry,
-    and as a LifecycleState.REGISTERED entry in the Lifecycle Manager,
-    which is the sole owner of runtime lifecycle state for the
-    Lifecycle Manager's own purposes. Neither initialize() nor start()
-    is called on the Lifecycle Manager for any of them here. Scheduler,
-    the Intent Router, the Workflow Engine, the Conversation Manager,
-    the Intent Dispatcher, the Knowledge Graph, Memory Integration, the
-    Reasoning Engine, the Decision Engine, the Agent Runtime, the
-    Connector Manager, the Cognitive Pipeline, and the Agent Service
-    are thirteen of these twenty-three that actually implement
-    IService (see ADR-0002) - though the Knowledge Graph, the
-    Reasoning Engine, and the Decision Engine, each per its own
+    Agent Runtime, the Connector Manager, the Cognitive Pipeline, the
+    Response Engine, and the Agent Service is recorded as a
+    ServiceDescriptor (identity and descriptive data only, no runtime
+    state) in the Service Registry, and as a LifecycleState.REGISTERED
+    entry in the Lifecycle Manager, which is the sole owner of runtime
+    lifecycle state for the Lifecycle Manager's own purposes. Neither
+    initialize() nor start() is called on the Lifecycle Manager for
+    any of them here. Scheduler, the Intent Router, the Workflow
+    Engine, the Conversation Manager, the Intent Dispatcher, the
+    Knowledge Graph, Memory Integration, the Reasoning Engine, the
+    Decision Engine, the Agent Runtime, the Connector Manager, the
+    Cognitive Pipeline, the Response Engine, and the Agent Service are
+    fourteen of these twenty-four that actually implement IService
+    (see ADR-0002) - though the Knowledge Graph, the Reasoning Engine,
+    the Decision Engine, and the Response Engine, each per its own
     explicit work order instruction rather than an independent
-    application of ADR-0002's criterion, are the second, third, and
-    fourth of these thirteen (after the Intent Router) with no method
-    gated on the RUNNING state at all; Memory Integration, the
-    Cognitive Pipeline, and the Agent Service, by contrast, are each
-    explicitly instructed to adopt IService AND independently satisfy
-    ADR-0002's criterion on its own merits
+    application of ADR-0002's criterion, are the second, third,
+    fourth, and fifth of these fourteen (after the Intent Router) with
+    no method gated on the RUNNING state at all - the Response Engine
+    is also the first of these five for which the underlying reason is
+    not merely "no method happens to call anything gateable" but "the
+    service holds no constructor dependency whatsoever" ("ResponseEngine
+    may depend only on: Plan," a per-call argument, never injected);
+    Memory Integration, the Cognitive Pipeline, and the Agent Service,
+    by contrast, are each explicitly instructed to adopt IService AND
+    independently satisfy ADR-0002's criterion on its own merits
     (synchronize_memory()/synchronize_all()/remove_memory(), run(),
     and run(), respectively, are genuinely gated) - see ADR-0002's
     newly appended Empirical Findings for Packages 019, 020, 021, 025,
-    and 026. The Capability Registry, the Plugin Manager, and the
+    026, and 027. The Capability Registry, the Plugin Manager, and the
     Planner deliberately do not implement IService at all (see
     argus/capability/interfaces.py's, argus/plugins/interfaces.py's,
     and argus/planner/interfaces.py's Architectural Notes). This
@@ -842,6 +893,7 @@ def _register_core_services(
         agent_runtime: The Agent Runtime instance.
         connector_manager: The Connector Manager instance.
         cognitive_pipeline: The Cognitive Pipeline instance.
+        response_engine: The Response Engine instance.
         agent_service: The Agent Service instance.
     """
     core_services = (
@@ -867,6 +919,7 @@ def _register_core_services(
         ("agent_runtime", agent_runtime, IAgentRuntime),
         ("connector_manager", connector_manager, IConnectorManager),
         ("cognitive_pipeline", cognitive_pipeline, ICognitivePipeline),
+        ("response_engine", response_engine, IResponseEngine),
         ("agent_service", agent_service, IAgentService),
     )
 

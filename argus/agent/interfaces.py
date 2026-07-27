@@ -3,7 +3,12 @@ Public interface contract for the ArgusOS Agent Session package.
 
 Purpose:
     Define IAgentService, the contract other modules depend on, per
-    factory/packages/026_AGENT_SESSION.md.
+    factory/packages/026_AGENT_SESSION.md, as amended by
+    factory/packages/027_RESPONSE_ENGINE.md's own explicit "Agent
+    Integration" instruction (run() now also invokes
+    ResponseEngine.build_response(); AgentResponse now wraps a
+    Response instead of a PipelineResult - see response.py's and
+    service.py's own module docstrings for the full amendment).
 
 Architectural Note - Why IAgentService DOES Inherit IService:
     "Register AgentService as the next core service" is the direct
@@ -68,15 +73,19 @@ class IAgentService(IService):
     @abstractmethod
     def run(self, request: AgentRequest) -> AgentResponse:
         """Accept `request`, invoke CognitivePipeline.run() with a
-        PipelineRequest built from it, and return the resulting
-        AgentResponse, wrapping the PipelineResult unmodified.
-        Performs no reasoning, decision making, planning, or execution
-        itself - see service.py's own module docstring for the exact
-        orchestration sequence. Raises InvalidAgentRequestError if
-        `request` is not an AgentRequest instance, its `session` field
-        is not an AgentSession instance, or its `conversation` field
-        is not a ConversationSession instance. Raises
-        AgentExecutionError, wrapping the underlying exception, if the
-        delegated CognitivePipeline.run() call raises. Raises
-        AgentError if this service's own IService state is not
+        PipelineRequest built from it, invoke
+        ResponseEngine.build_response() with the resulting Plan, and
+        return the resulting AgentResponse, wrapping the standardized
+        Response unmodified (Package 027's own "Agent Integration"
+        amendment to Package 026's original PipelineResult-wrapping
+        behavior). Performs no reasoning, decision making, planning,
+        or execution itself - see service.py's own module docstring
+        for the exact orchestration sequence. Raises
+        InvalidAgentRequestError if `request` is not an AgentRequest
+        instance, its `session` field is not an AgentSession instance,
+        or its `conversation` field is not a ConversationSession
+        instance. Raises AgentExecutionError, wrapping the underlying
+        exception, if the delegated CognitivePipeline.run() call or
+        the delegated ResponseEngine.build_response() call raises.
+        Raises AgentError if this service's own IService state is not
         RUNNING."""

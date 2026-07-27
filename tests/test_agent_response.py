@@ -4,151 +4,119 @@ import dataclasses
 import unittest
 
 from argus.agent import AgentResponse, AgentSession
-from argus.context import ContextBuilder
 from argus.conversation import ConversationSession
 from argus.intent import Intent, IntentType
 from argus.planner import Plan
-from argus.planning import PlanningSessionBuilder
-from argus.pipeline import PipelineResult
+from argus.response import Response
 
 
 def _plan():
     return Plan(originating_intent=Intent(name=IntentType.UNKNOWN, confidence=0.0))
 
 
-def _cognitive_context():
-    return ContextBuilder().build()
-
-
-def _planning_session(cognitive_context):
-    return PlanningSessionBuilder().with_context(cognitive_context).build()
-
-
-def _pipeline_result(conversation):
-    cognitive_context = _cognitive_context()
-    return PipelineResult(
-        conversation=conversation,
-        cognitive_context=cognitive_context,
-        planning_session=_planning_session(cognitive_context),
-        plan=_plan(),
-    )
+def _response():
+    return Response(plan=_plan())
 
 
 class DefaultsTests(unittest.TestCase):
     def test_defaults(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
-        response = AgentResponse(session=session, pipeline_result=pipeline_result)
-        self.assertIs(response.session, session)
-        self.assertIs(response.pipeline_result, pipeline_result)
-        self.assertTrue(response.response_id)
-        self.assertEqual(dict(response.metadata), {})
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        agent_response = AgentResponse(session=session, response=response_obj)
+        self.assertIs(agent_response.session, session)
+        self.assertIs(agent_response.response, response_obj)
+        self.assertTrue(agent_response.response_id)
+        self.assertEqual(dict(agent_response.metadata), {})
 
     def test_all_fields_set(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
-        response = AgentResponse(
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        agent_response = AgentResponse(
             session=session,
-            pipeline_result=pipeline_result,
+            response=response_obj,
             response_id="fixed-id",
             metadata={"k": "v"},
         )
-        self.assertEqual(response.response_id, "fixed-id")
-        self.assertEqual(dict(response.metadata), {"k": "v"})
+        self.assertEqual(agent_response.response_id, "fixed-id")
+        self.assertEqual(dict(agent_response.metadata), {"k": "v"})
 
     def test_default_response_id_is_unique_per_instance(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
-        a = AgentResponse(session=session, pipeline_result=pipeline_result)
-        b = AgentResponse(session=session, pipeline_result=pipeline_result)
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        a = AgentResponse(session=session, response=response_obj)
+        b = AgentResponse(session=session, response=response_obj)
         self.assertNotEqual(a.response_id, b.response_id)
+
+    def test_agent_response_id_is_distinct_from_wrapped_responses_own_id(self):
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        agent_response = AgentResponse(session=session, response=response_obj)
+        self.assertNotEqual(agent_response.response_id, response_obj.response_id)
 
 
 class MetadataTests(unittest.TestCase):
     def test_metadata_is_wrapped_in_mappingproxytype(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        response = AgentResponse(
-            session=session, pipeline_result=_pipeline_result(conversation), metadata={"a": 1}
-        )
-        self.assertNotIsInstance(response.metadata, dict)
-        self.assertEqual(response.metadata["a"], 1)
+        session = AgentSession(conversation=ConversationSession())
+        agent_response = AgentResponse(session=session, response=_response(), metadata={"a": 1})
+        self.assertNotIsInstance(agent_response.metadata, dict)
+        self.assertEqual(agent_response.metadata["a"], 1)
 
     def test_metadata_defensive_copy_not_shared_with_caller(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
+        session = AgentSession(conversation=ConversationSession())
         original = {"a": 1}
-        response = AgentResponse(
-            session=session, pipeline_result=_pipeline_result(conversation), metadata=original
-        )
+        agent_response = AgentResponse(session=session, response=_response(), metadata=original)
         original["a"] = 999
-        self.assertEqual(response.metadata["a"], 1)
+        self.assertEqual(agent_response.metadata["a"], 1)
 
     def test_metadata_is_immutable(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        response = AgentResponse(
-            session=session, pipeline_result=_pipeline_result(conversation), metadata={"a": 1}
-        )
+        session = AgentSession(conversation=ConversationSession())
+        agent_response = AgentResponse(session=session, response=_response(), metadata={"a": 1})
         with self.assertRaises(TypeError):
-            response.metadata["a"] = 2
+            agent_response.metadata["a"] = 2
 
 
 class ImmutabilityTests(unittest.TestCase):
     def test_immutability(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        response = AgentResponse(session=session, pipeline_result=_pipeline_result(conversation))
+        session = AgentSession(conversation=ConversationSession())
+        agent_response = AgentResponse(session=session, response=_response())
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            response.pipeline_result = None
+            agent_response.response = None
 
 
 class ResponseWrappingTests(unittest.TestCase):
-    def test_no_natural_language_or_execution_fields_exist(self):
-        # "Do not generate natural-language responses. Do not perform
-        # execution. Wrap the PipelineResult only."
+    def test_no_pipeline_result_field_exists(self):
+        # Package 027's own "Agent Integration" amendment: AgentResponse
+        # now wraps a Response, not a PipelineResult.
         field_names = {f.name for f in dataclasses.fields(AgentResponse)}
         self.assertEqual(
-            field_names, {"session", "pipeline_result", "response_id", "metadata"}
+            field_names, {"session", "response", "response_id", "metadata"}
         )
 
-    def test_pipeline_result_is_wrapped_unmodified(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
-        response = AgentResponse(session=session, pipeline_result=pipeline_result)
-        self.assertIs(response.pipeline_result, pipeline_result)
-        self.assertIs(response.pipeline_result.conversation, conversation)
+    def test_response_is_wrapped_unmodified(self):
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        agent_response = AgentResponse(session=session, response=response_obj)
+        self.assertIs(agent_response.response, response_obj)
+        self.assertIs(agent_response.response.plan, response_obj.plan)
 
 
 class EqualityTests(unittest.TestCase):
     def test_equality_when_all_fields_match(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
         a = AgentResponse(
-            session=session,
-            pipeline_result=pipeline_result,
-            response_id="r1",
-            metadata={"k": "v"},
+            session=session, response=response_obj, response_id="r1", metadata={"k": "v"}
         )
         b = AgentResponse(
-            session=session,
-            pipeline_result=pipeline_result,
-            response_id="r1",
-            metadata={"k": "v"},
+            session=session, response=response_obj, response_id="r1", metadata={"k": "v"}
         )
         self.assertEqual(a, b)
 
     def test_not_equal_when_response_id_differs(self):
-        conversation = ConversationSession()
-        session = AgentSession(conversation=conversation)
-        pipeline_result = _pipeline_result(conversation)
-        a = AgentResponse(session=session, pipeline_result=pipeline_result, response_id="r1")
-        b = AgentResponse(session=session, pipeline_result=pipeline_result, response_id="r2")
+        session = AgentSession(conversation=ConversationSession())
+        response_obj = _response()
+        a = AgentResponse(session=session, response=response_obj, response_id="r1")
+        b = AgentResponse(session=session, response=response_obj, response_id="r2")
         self.assertNotEqual(a, b)
 
 

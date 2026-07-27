@@ -19,6 +19,7 @@ from argus.lifecycle import IService
 from argus.lifecycle.lifecycle import LifecycleState
 from argus.pipeline import CognitivePipeline
 from argus.planner import Planner
+from argus.response import Response, ResponseEngine
 
 
 def _silent_logger() -> logging.Logger:
@@ -54,11 +55,33 @@ class RecordingPipeline:
 
 class RaisingPipeline:
     def run(self, request):
-        raise RuntimeError("synthetic failure for dependency-failure testing")
+        raise RuntimeError("synthetic pipeline failure for dependency-failure testing")
 
 
-def _started_service(pipeline=None) -> AgentService:
-    service = AgentService(cognitive_pipeline=pipeline or _real_pipeline())
+class RecordingResponseEngine:
+    """A test double recording exactly what build_response() was
+    called with, so Response Engine invocation can be verified without
+    depending on ResponseEngine's own internals."""
+
+    def __init__(self, response_to_return):
+        self.calls = []
+        self._response_to_return = response_to_return
+
+    def build_response(self, plan):
+        self.calls.append(plan)
+        return self._response_to_return
+
+
+class RaisingResponseEngine:
+    def build_response(self, plan):
+        raise RuntimeError("synthetic response engine failure for dependency-failure testing")
+
+
+def _started_service(pipeline=None, response_engine=None) -> AgentService:
+    service = AgentService(
+        cognitive_pipeline=pipeline or _real_pipeline(),
+        response_engine=response_engine or ResponseEngine(),
+    )
     service.initialize()
     service.start()
     return service
@@ -71,13 +94,15 @@ class AgentServiceIdentityTests(unittest.TestCase):
     def test_is_an_iagentservice(self):
         from argus.agent import IAgentService
 
-        self.assertIsInstance(AgentService(cognitive_pipeline=_real_pipeline()), IAgentService)
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        self.assertIsInstance(service, IAgentService)
 
     def test_is_an_iservice(self):
-        self.assertIsInstance(AgentService(cognitive_pipeline=_real_pipeline()), IService)
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
+        self.assertIsInstance(service, IService)
 
     def test_starts_in_created_state(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         self.assertEqual(service.status(), LifecycleState.CREATED)
 
 
@@ -86,29 +111,29 @@ class AgentServiceIdentityTests(unittest.TestCase):
 
 class AgentServiceLifecycleTests(unittest.TestCase):
     def test_initialize_transitions_to_initializing(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         service.initialize()
         self.assertEqual(service.status(), LifecycleState.INITIALIZING)
 
     def test_initialize_twice_raises(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         service.initialize()
         with self.assertRaises(AgentError):
             service.initialize()
 
     def test_start_requires_initializing(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         with self.assertRaises(AgentError):
             service.start()
 
     def test_start_transitions_to_running(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         service.initialize()
         service.start()
         self.assertEqual(service.status(), LifecycleState.RUNNING)
 
     def test_stop_requires_running(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         with self.assertRaises(AgentError):
             service.stop()
 
@@ -118,7 +143,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
         self.assertEqual(service.status(), LifecycleState.STOPPED)
 
     def test_status_reflects_current_state_throughout(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         self.assertEqual(service.status(), LifecycleState.CREATED)
         service.initialize()
         self.assertEqual(service.status(), LifecycleState.INITIALIZING)
@@ -137,7 +162,7 @@ class RunValidationTests(unittest.TestCase):
         return AgentRequest(session=session, conversation=session.conversation)
 
     def test_run_before_started_raises_agent_error(self):
-        service = AgentService(cognitive_pipeline=_real_pipeline())
+        service = AgentService(cognitive_pipeline=_real_pipeline(), response_engine=ResponseEngine())
         with self.assertRaises(AgentError):
             service.run(self._request())
 
@@ -189,7 +214,7 @@ class EmptySessionTests(unittest.TestCase):
         response = service.run(request)
 
         self.assertIs(response.session, session)
-        self.assertEqual(response.pipeline_result.plan.steps, ())
+        self.assertEqual(response.response.plan.steps, ())
 
 
 class PopulatedSessionTests(unittest.TestCase):
@@ -206,17 +231,31 @@ class PopulatedSessionTests(unittest.TestCase):
 
         response = service.run(request)
 
-        self.assertEqual(len(response.pipeline_result.conversation.messages), 2)
-        self.assertEqual(response.pipeline_result.conversation.messages[0].content, "hello")
+        # The Plan itself carries no conversation reference (per
+        # Plan's own pre-existing shape) - "carried through unchanged"
+        # is verified via the Response's own successful construction
+        # rather than message content, since Response (Package 027)
+        # no longer holds the PipelineResult/ConversationSession at
+        # all, only the Plan.
+        self.assertIsInstance(response.response, Response)
+        self.assertEqual(response.response.plan.steps, ())
 
 
 # -- pipeline invocation ----------------------------------------------------
 
 
+class _StubPipelineResult:
+    """Minimal stand-in carrying just the one attribute
+    AgentService.run() actually reads off a PipelineResult: `plan`."""
+
+    def __init__(self, plan=None):
+        self.plan = plan
+
+
 class PipelineInvocationTests(unittest.TestCase):
     def test_pipeline_run_invoked_exactly_once(self):
-        recording = RecordingPipeline(result_to_return=None)
-        service = _started_service(pipeline=recording)
+        recording = RecordingPipeline(result_to_return=_StubPipelineResult())
+        service = _started_service(pipeline=recording, response_engine=RecordingResponseEngine(None))
         session = AgentSession(conversation=ConversationSession())
 
         service.run(AgentRequest(session=session, conversation=session.conversation))
@@ -224,8 +263,8 @@ class PipelineInvocationTests(unittest.TestCase):
         self.assertEqual(len(recording.calls), 1)
 
     def test_pipeline_receives_the_requests_own_conversation(self):
-        recording = RecordingPipeline(result_to_return=None)
-        service = _started_service(pipeline=recording)
+        recording = RecordingPipeline(result_to_return=_StubPipelineResult())
+        service = _started_service(pipeline=recording, response_engine=RecordingResponseEngine(None))
         conversation = ConversationSession()
         session = AgentSession(conversation=conversation)
 
@@ -233,21 +272,9 @@ class PipelineInvocationTests(unittest.TestCase):
 
         self.assertIs(recording.calls[0].conversation, conversation)
 
-    def test_response_pipeline_result_is_exactly_what_pipeline_returned(self):
-        sentinel_result = object()
-        recording = RecordingPipeline(result_to_return=sentinel_result)
-        service = _started_service(pipeline=recording)
-        session = AgentSession(conversation=ConversationSession())
-
-        response = service.run(
-            AgentRequest(session=session, conversation=session.conversation)
-        )
-
-        self.assertIs(response.pipeline_result, sentinel_result)
-
     def test_multiple_runs_each_invoke_pipeline_independently(self):
-        recording = RecordingPipeline(result_to_return=None)
-        service = _started_service(pipeline=recording)
+        recording = RecordingPipeline(result_to_return=_StubPipelineResult())
+        service = _started_service(pipeline=recording, response_engine=RecordingResponseEngine(None))
         session = AgentSession(conversation=ConversationSession())
 
         service.run(AgentRequest(session=session, conversation=session.conversation))
@@ -257,38 +284,88 @@ class PipelineInvocationTests(unittest.TestCase):
         self.assertIsNot(recording.calls[0], recording.calls[1])
 
 
+# -- agent integration: Response Engine invocation ---------------------------
+
+
+class ResponseEngineInvocationTests(unittest.TestCase):
+    def test_build_response_invoked_exactly_once(self):
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 1)
+
+    def test_build_response_receives_the_pipeline_results_own_plan(self):
+        real_pipeline = _real_pipeline()
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(pipeline=real_pipeline, response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        # The Plan passed to build_response() must be a genuine Plan
+        # produced by the real Cognitive Pipeline's own orchestration,
+        # proving the two delegate calls are wired in the correct
+        # order (pipeline.run() first, then response_engine.build_response()
+        # on its result).
+        self.assertEqual(len(recording.calls), 1)
+        self.assertEqual(recording.calls[0].steps, ())
+
+    def test_agent_response_wraps_exactly_what_response_engine_returned(self):
+        sentinel_response = object()
+        recording = RecordingResponseEngine(response_to_return=sentinel_response)
+        service = _started_service(response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+
+        agent_response = service.run(
+            AgentRequest(session=session, conversation=session.conversation)
+        )
+
+        self.assertIs(agent_response.response, sentinel_response)
+
+    def test_multiple_runs_each_invoke_response_engine_independently(self):
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+        service.run(AgentRequest(session=session, conversation=session.conversation))
+
+        self.assertEqual(len(recording.calls), 2)
+
+
 # -- response wrapping -----------------------------------------------------
 
 
 class ResponseWrappingTests(unittest.TestCase):
-    def test_response_wraps_pipeline_result_unmodified(self):
+    def test_response_wraps_a_real_response_object(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
-        response = service.run(
+        agent_response = service.run(
             AgentRequest(session=session, conversation=session.conversation)
         )
-        self.assertIsNotNone(response.pipeline_result)
-        self.assertIsNotNone(response.pipeline_result.plan)
-        self.assertIsNotNone(response.pipeline_result.cognitive_context)
-        self.assertIsNotNone(response.pipeline_result.planning_session)
+        self.assertIsInstance(agent_response.response, Response)
+        self.assertIsNotNone(agent_response.response.plan)
 
     def test_response_contains_the_requests_own_session(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
-        response = service.run(
+        agent_response = service.run(
             AgentRequest(session=session, conversation=session.conversation)
         )
-        self.assertIs(response.session, session)
+        self.assertIs(agent_response.session, session)
 
-    def test_response_has_no_natural_language_or_execution_fields(self):
+    def test_agent_response_has_no_pipeline_result_field(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
-        response = service.run(
+        agent_response = service.run(
             AgentRequest(session=session, conversation=session.conversation)
         )
-        field_names = {f.name for f in dataclasses.fields(response)}
+        field_names = {f.name for f in dataclasses.fields(agent_response)}
         self.assertEqual(
-            field_names, {"session", "pipeline_result", "response_id", "metadata"}
+            field_names, {"session", "response", "response_id", "metadata"}
         )
 
 
@@ -299,11 +376,11 @@ class ImmutableObjectsTests(unittest.TestCase):
     def test_response_fields_cannot_be_reassigned(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
-        response = service.run(
+        agent_response = service.run(
             AgentRequest(session=session, conversation=session.conversation)
         )
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            response.pipeline_result = None
+            agent_response.response = None
 
     def test_request_is_never_mutated(self):
         service = _started_service()
@@ -344,49 +421,60 @@ class DependencyFailureTests(unittest.TestCase):
         with self.assertRaises(AgentExecutionError):
             service.run(AgentRequest(session=session, conversation=session.conversation))
 
+    def test_response_engine_failure_is_wrapped_as_agent_execution_error(self):
+        service = _started_service(response_engine=RaisingResponseEngine())
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError) as ctx:
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+        self.assertIsInstance(ctx.exception.__cause__, RuntimeError)
+
+    def test_no_response_returned_on_response_engine_failure(self):
+        service = _started_service(response_engine=RaisingResponseEngine())
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+
+    def test_response_engine_never_called_when_pipeline_fails_first(self):
+        recording = RecordingResponseEngine(response_to_return=None)
+        service = _started_service(pipeline=RaisingPipeline(), response_engine=recording)
+        session = AgentSession(conversation=ConversationSession())
+        with self.assertRaises(AgentExecutionError):
+            service.run(AgentRequest(session=session, conversation=session.conversation))
+        self.assertEqual(len(recording.calls), 0)
+
 
 # -- metadata propagation ----------------------------------------------------
 
 
 class MetadataPropagationTests(unittest.TestCase):
-    def test_request_metadata_propagates_to_response_metadata(self):
+    def test_request_metadata_propagates_to_agent_response_metadata(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
         request = AgentRequest(
             session=session, conversation=session.conversation, metadata={"foo": "bar"}
         )
-        response = service.run(request)
-        self.assertEqual(response.metadata["foo"], "bar")
+        agent_response = service.run(request)
+        self.assertEqual(agent_response.metadata["foo"], "bar")
 
-    def test_request_metadata_propagates_through_to_pipeline_result_metadata(self):
+    def test_plan_metadata_propagates_through_to_response_metadata_extra(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
-        request = AgentRequest(
-            session=session, conversation=session.conversation, metadata={"foo": "bar"}
-        )
-        response = service.run(request)
-        self.assertEqual(response.pipeline_result.metadata["foo"], "bar")
-
-    def test_request_metadata_propagates_through_to_cognitive_context(self):
-        service = _started_service()
-        session = AgentSession(conversation=ConversationSession())
-        request = AgentRequest(
-            session=session, conversation=session.conversation, metadata={"foo": "bar"}
-        )
-        response = service.run(request)
-        self.assertEqual(
-            response.pipeline_result.cognitive_context.metadata.extra["foo"], "bar"
-        )
+        request = AgentRequest(session=session, conversation=session.conversation)
+        agent_response = service.run(request)
+        # The Plan built by Planner.plan_session() always carries
+        # planning_session_id (Package 024) - ResponseEngine copies
+        # plan.metadata into response.metadata.extra unchanged.
+        self.assertIn("planning_session_id", agent_response.response.metadata.extra)
 
     def test_agent_request_id_and_session_id_are_propagated(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
         request = AgentRequest(session=session, conversation=session.conversation)
-        response = service.run(request)
-        self.assertEqual(response.metadata["agent_request_id"], request.request_id)
-        self.assertEqual(response.metadata["agent_session_id"], session.session_id)
+        agent_response = service.run(request)
+        self.assertEqual(agent_response.metadata["agent_request_id"], request.request_id)
+        self.assertEqual(agent_response.metadata["agent_session_id"], session.session_id)
 
-    def test_multiple_metadata_keys_all_propagate(self):
+    def test_multiple_metadata_keys_all_propagate_to_agent_response(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
         request = AgentRequest(
@@ -394,18 +482,17 @@ class MetadataPropagationTests(unittest.TestCase):
             conversation=session.conversation,
             metadata={"a": 1, "b": 2, "c": "three"},
         )
-        response = service.run(request)
+        agent_response = service.run(request)
         for key, value in {"a": 1, "b": 2, "c": "three"}.items():
-            self.assertEqual(response.metadata[key], value)
-            self.assertEqual(response.pipeline_result.metadata[key], value)
+            self.assertEqual(agent_response.metadata[key], value)
 
     def test_empty_metadata_still_carries_traceability_keys_only(self):
         service = _started_service()
         session = AgentSession(conversation=ConversationSession())
         request = AgentRequest(session=session, conversation=session.conversation)
-        response = service.run(request)
+        agent_response = service.run(request)
         self.assertEqual(
-            dict(response.metadata),
+            dict(agent_response.metadata),
             {
                 "agent_request_id": request.request_id,
                 "agent_session_id": session.session_id,
