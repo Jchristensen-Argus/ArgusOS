@@ -74,3 +74,30 @@ class RuleEvaluationError(DecisionError):
     Architectural Decision for why a raising predicate aborts the
     call rather than being treated as an expected, best-effort
     failure."""
+
+
+# ---------------------------------------------------------------------------
+# argus.decision.decision_record - DecisionRecordError hierarchy
+# ---------------------------------------------------------------------------
+#
+# Appended per factory/packages/039_DECISION_FRAMEWORK.md. Everything above
+# this point is Package 021's own Decision Engine exception hierarchy
+# (DecisionError and its five subtypes) and is unmodified. DecisionRecordError
+# is a wholly independent exception hierarchy for the new DecisionRecord
+# domain object introduced by Package 039 - it does NOT subclass DecisionError,
+# since the two concepts are unrelated (see argus/decision/decision_record.py's
+# own module docstring); a caller catching DecisionError to handle Decision
+# Engine failures must not also silently catch unrelated DecisionRecordBuilder
+# validation failures, and vice versa.
+
+
+class DecisionRecordError(Exception):
+    """Base exception for the DecisionRecord domain object introduced
+    by Package 039. Deliberately does not subclass DecisionError -
+    see this section's own header comment."""
+
+
+class InvalidDecisionRecordError(DecisionRecordError):
+    """Raised when DecisionRecordBuilder's with_title()/with_question()/
+    with_status()/with_priority()/with_metadata() is given a malformed
+    argument."""

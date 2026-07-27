@@ -1525,3 +1525,46 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **`owner`/`tags` are not settable through `GoalBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `GoalMetadata` construction.
 - **No transition logic on `GoalStatus`, no ordering behavior on `GoalPriority`.**
 - No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
+
+---
+
+## Package 039 - Decision Framework
+
+### Added
+
+- Added `argus/decision/decision_record.py`, `argus/decision/metadata.py`, `argus/decision/builder.py`, `argus/decision/status.py`, `argus/decision/priority.py` - a new "captured question, options, outcome, and reasoning" domain object, `DecisionRecord`, belonging conceptually to a Project (documented relationship only). "A Decision captures a question, the available options, the selected outcome, and the reasoning that led to it."
+- `DecisionRecord` (`argus/decision/decision_record.py`) - immutable, `decision_id`, `title`, `question`, `status`, `priority`, `metadata`. Every field defaults. `title`/`question`, not `name`/`description` - a literal reading of this package's own distinct field list.
+- `DecisionRecordStatus` (`argus/decision/status.py`) - a plain `Enum`, five members: `PENDING`, `IN_REVIEW`, `APPROVED`, `REJECTED`, `ARCHIVED`. No transition logic. `PENDING` is the default.
+- `DecisionRecordPriority` (`argus/decision/priority.py`) - a plain `Enum`, NOT an `IntEnum`, four members: `LOW`, `NORMAL`, `HIGH`, `CRITICAL`. No ordering behavior. `NORMAL` is the default, per explicit instruction to match `GoalPriority`'s (038) own established exception to the "first-listed member is the default" convention.
+- `DecisionRecordMetadata` (`argus/decision/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra` - the identical composition and order `ProjectMetadata` (036), `WorkspaceMetadata` (037), and `GoalMetadata` (038) established, directly named by this package's own work order as the precedent to follow.
+- `DecisionRecordBuilder` / `IDecisionRecordBuilder` (`argus/decision/builder.py`, appended to `argus/decision/interfaces.py`) - "Builder is the only mutable object." `with_priority()` IS implemented, unlike `with_owner()`/`with_tags()` - identical reasoning to `GoalBuilder` (038). No `with_decision_id()`.
+- `DecisionRecordError`, `InvalidDecisionRecordError` (appended to `argus/decision/exceptions.py`) - deliberately does NOT subclass `DecisionError` (Package 021's own base), since the two concepts are unrelated.
+- Added `factory/packages/039_DECISION_FRAMEWORK.md`.
+- Added `tests/test_decision_record.py`, `tests/test_decision_record_builder.py`, `tests/test_decision_record_metadata.py`, `tests/test_decision_record_status.py`, `tests/test_decision_record_priority.py` - 96 new tests, entirely additive.
+
+### A Genuine Naming Collision, Not A Judgment Call
+
+- Pre-flight discovered `argus/decision/` is already the live **Decision Engine** (Package 021, wired into `bootstrap.py` as a core service), with its own pre-existing `Decision`/`DecisionEngine`/`IDecisionEngine`/`DecisionRule`/`DecisionError` hierarchy. This package's own work order asks for a class named `Decision`, in a module named `decision.py`, describing an unrelated concept - building it literally would have overwritten `argus/decision/decision.py`/`interfaces.py`/`exceptions.py`/`__init__.py`, breaking the Decision Engine and its own existing tests. Implementation paused; the Founder was consulted directly. Per explicit direction ("extend the existing package... using non-conflicting names... preserving complete backward compatibility... No existing runtime behavior should change"), this package's model is named `DecisionRecord` throughout, and `argus/decision/__init__.py`/`interfaces.py`/`exceptions.py` are extended additively - every pre-existing symbol untouched, in its original position. See `factory/packages/039_DECISION_FRAMEWORK.md`'s own dedicated section for the complete record.
+
+### Changed
+
+- `argus/decision/__init__.py`, `argus/decision/interfaces.py`, `argus/decision/exceptions.py` - additively extended only (new imports/classes appended under a marked "Package 039 additions" section). `argus/decision/decision.py`, `argus/decision/engine.py`, `argus/decision/rule.py`, and `argus/bootstrap.py` are confirmed **unmodified** via `git diff --stat`.
+
+### Not Changed
+
+- **No changes to Workspace, Project, Goal, Plan, Task, Execution, Capability, Response, Runtime, or Bootstrap.**
+- **The Decision Engine (Package 021) is fully unmodified in behavior** - `tests/test_decision.py`, `test_decision_engine.py`, `test_decision_rule.py`, `test_bootstrap.py` (116 tests) all pass unmodified.
+- **No ownership relationship to Project implemented, even minimally.**
+- **No persistence, no AI, no plugins, no automation** - "Decision is a passive domain object only."
+
+### Engineering Decision
+
+- The naming collision is resolved via `DecisionRecord` (not `Decision`) and additive extension of the three shared files (not replacement) - the minimum-deviation resolution once the Founder's own direction was given. See `factory/packages/039_DECISION_FRAMEWORK.md`'s own Engineering Decisions section for the full reasoning, including why `decision.py` became `decision_record.py` while `metadata.py`/`builder.py`/`status.py`/`priority.py` kept their exact work-order-specified names (those filenames were genuinely free).
+
+### Known Limitations
+
+- **No ownership relationship between `Project` and `DecisionRecord` is implemented** - documented only.
+- **`owner`/`tags` are not settable through `DecisionRecordBuilder`.**
+- **No transition logic on `DecisionRecordStatus`, no ordering behavior on `DecisionRecordPriority`.**
+- **`DecisionRecord` and `Decision` (Decision Engine) coexist in the same package under different names** - a direct, documented consequence of the collision resolution.
+- No persistence, no concurrency, no scheduling, no runtime behavior of any kind.

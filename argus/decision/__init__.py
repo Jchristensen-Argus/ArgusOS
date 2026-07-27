@@ -29,6 +29,30 @@ from argus.decision.exceptions import (
 from argus.decision.interfaces import IDecisionEngine
 from argus.decision.rule import DecisionPredicate, DecisionRule
 
+# ---------------------------------------------------------------------------
+# argus.decision.decision_record - Package 039 additions
+# ---------------------------------------------------------------------------
+#
+# Everything above is Package 021's own Decision Engine re-exports and is
+# unmodified. The imports below add the new DecisionRecord domain object
+# introduced by Package 039 - see argus/decision/decision_record.py's own
+# module docstring for why this concept is named DecisionRecord rather than
+# Decision, to avoid colliding with Decision/DecisionEngine/IDecisionEngine
+# above.
+from argus.decision.builder import DecisionRecordBuilder
+from argus.decision.decision_record import DecisionRecord
+from argus.decision.exceptions import (
+    DecisionRecordError,
+    InvalidDecisionRecordError,
+)
+from argus.decision.interfaces import IDecisionRecordBuilder
+from argus.decision.metadata import (
+    DECISION_RECORD_METADATA_VERSION,
+    DecisionRecordMetadata,
+)
+from argus.decision.priority import DecisionRecordPriority
+from argus.decision.status import DecisionRecordStatus
+
 __all__ = [
     "IDecisionEngine",
     "DecisionEngine",
@@ -41,4 +65,14 @@ __all__ = [
     "RuleNotFoundError",
     "InvalidDecisionInputError",
     "RuleEvaluationError",
+    # Package 039 additions - see the import section above.
+    "DecisionRecord",
+    "DecisionRecordStatus",
+    "DecisionRecordPriority",
+    "DecisionRecordMetadata",
+    "DECISION_RECORD_METADATA_VERSION",
+    "DecisionRecordBuilder",
+    "IDecisionRecordBuilder",
+    "DecisionRecordError",
+    "InvalidDecisionRecordError",
 ]

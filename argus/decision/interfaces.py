@@ -172,3 +172,75 @@ class IDecisionEngine(IService):
         package's own "implement persistence" Constraint). For the
         outcome of a specific evaluation, see that call's own returned
         Decision.metadata instead."""
+
+
+# ---------------------------------------------------------------------------
+# argus.decision.decision_record - IDecisionRecordBuilder
+# ---------------------------------------------------------------------------
+#
+# Appended per factory/packages/039_DECISION_FRAMEWORK.md. Everything above
+# this point is Package 021's own Decision Engine contract (IDecisionEngine)
+# and is unmodified. IDecisionRecordBuilder is a wholly independent contract
+# for the new DecisionRecord domain object introduced by Package 039 - see
+# argus/decision/decision_record.py's own module docstring for why this
+# package's model is named DecisionRecord rather than Decision, to avoid
+# colliding with IDecisionEngine's own pre-existing Decision concept above.
+# IDecisionRecordBuilder does not inherit IService, exactly mirroring
+# IGoalBuilder (038) / IProjectBuilder (036) / IWorkspaceBuilder (037) - a
+# builder has no meaningful start/stop lifecycle of its own.
+
+from abc import ABC  # noqa: E402
+from argus.decision.decision_record import DecisionRecord  # noqa: E402
+from argus.decision.priority import DecisionRecordPriority  # noqa: E402
+from argus.decision.status import DecisionRecordStatus  # noqa: E402
+
+
+class IDecisionRecordBuilder(ABC):
+    """
+    Contract for a mutable, fluent DecisionRecord builder. See this
+    module's own DecisionRecord section header for why
+    IDecisionRecordBuilder does not inherit IService, and
+    decision_record.py's own module docstring for why this concept is
+    named DecisionRecord rather than Decision.
+    """
+
+    @abstractmethod
+    def with_title(self, title: str) -> "IDecisionRecordBuilder":
+        """Set this builder's title. A later call overwrites an
+        earlier one - the last call before build() wins. Raises
+        InvalidDecisionRecordError if `title` is not a non-empty
+        string."""
+
+    @abstractmethod
+    def with_question(self, question: str) -> "IDecisionRecordBuilder":
+        """Set this builder's question. A later call overwrites an
+        earlier one - the last call before build() wins. Raises
+        InvalidDecisionRecordError if `question` is not a non-empty
+        string."""
+
+    @abstractmethod
+    def with_status(self, status: DecisionRecordStatus) -> "IDecisionRecordBuilder":
+        """Set this builder's status. A later call overwrites an
+        earlier one - the last call before build() wins. Raises
+        InvalidDecisionRecordError if `status` is not a
+        DecisionRecordStatus instance."""
+
+    @abstractmethod
+    def with_priority(self, priority: DecisionRecordPriority) -> "IDecisionRecordBuilder":
+        """Set this builder's priority. A later call overwrites an
+        earlier one - the last call before build() wins. Raises
+        InvalidDecisionRecordError if `priority` is not a
+        DecisionRecordPriority instance."""
+
+    @abstractmethod
+    def with_metadata(self, key: str, value: Any) -> "IDecisionRecordBuilder":
+        """Set one arbitrary metadata key/value pair on the eventual
+        DecisionRecordMetadata.extra mapping. Accumulates across
+        multiple calls; the same key overwrites - last call wins.
+        Raises InvalidDecisionRecordError if `key` is not a
+        non-empty string."""
+
+    @abstractmethod
+    def build(self) -> DecisionRecord:
+        """Construct and return a fresh, immutable DecisionRecord
+        snapshot from this builder's current accumulated state."""
