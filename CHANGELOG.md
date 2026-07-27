@@ -1448,3 +1448,40 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **`owner`/`tags` are not settable through `ProjectBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `ProjectMetadata` construction.
 - **No transition logic on `ProjectStatus`.**
 - No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
+
+---
+
+## Package 037 - Workspace Framework
+
+### Added
+
+- Added `argus/workspace/` (`__init__.py`, `workspace.py`, `metadata.py`, `builder.py`, `status.py`, `interfaces.py`, `exceptions.py`) - the first-generation Workspace domain. "A Workspace represents the highest-level organizational boundary within Argus... A Workspace owns Projects. Projects own Goals. Goals own Plans. Plans own Tasks."
+- `Workspace` (`argus/workspace/workspace.py`) - immutable, `workspace_id`, `name`, `description`, `status`, `metadata`. Every field defaults - `Workspace()` is always valid - directly mirroring `Project`'s own shape (036), one level up the ownership hierarchy.
+- `WorkspaceStatus` (`argus/workspace/status.py`) - a plain `Enum` (not a `str` subclass), three members: `ACTIVE`, `INACTIVE`, `ARCHIVED`. No transition logic. `ACTIVE` is the default (the first-listed member, per this codebase's own convention) - unlike `ProjectStatus.PLANNING`'s own "not yet begun" meaning, a Workspace is presumed active by default.
+- `WorkspaceMetadata` (`argus/workspace/metadata.py`) - immutable, `created_at`, `version`, `correlation_id`, `owner`, `tags`, `extra` - the identical six-field composition `ProjectMetadata` (036) established, in the identical order, following `ProjectMetadata`'s own precedent over this package's own differently-ordered literal field list.
+- `WorkspaceBuilder` / `IWorkspaceBuilder` (`argus/workspace/builder.py`, `argus/workspace/interfaces.py`) - "Builder is the only mutable object." Directly mirrors `ProjectBuilder`'s own shape (036). No `with_workspace_id()`, no `with_owner()`, no `with_tags()` - `owner`/`tags` remain system-managed, not builder-overridable in Version 1, matching `ProjectMetadata`'s own identical treatment.
+- `WorkspaceError`, `InvalidWorkspaceError` (`argus/workspace/exceptions.py`).
+- Added `factory/packages/037_WORKSPACE_FRAMEWORK.md`.
+- Added `tests/test_workspace.py`, `tests/test_workspace_builder.py`, `tests/test_workspace_metadata.py`, `tests/test_workspace_status.py` - 73 new tests, entirely additive.
+
+### Changed
+
+- Nothing. This is the second consecutive package (after 036) to modify zero pre-existing files - purely additive to `argus/workspace/` and this package's own documentation.
+
+### Not Changed
+
+- **No changes to Project, Goal, Plan, Task, Execution, Capability, Response, Runtime, or Bootstrap.** Confirmed via `git diff --stat` showing zero lines changed outside `argus/workspace/` and the four documentation files.
+- **No `Goal` object introduced, even minimally.** "Do NOT... redesign Goal" - `Workspace` is genuinely standalone in Version 1, with no field referencing `Project`, `Goal`, `Plan`, or `Task`.
+- **No ownership relationships implemented** - Projects, Users, Shared Knowledge, Shared Assets, Automations, Credentials, Configuration, Policies, Models, Memory are all documented as future relationships only.
+- **No persistence, no AI, no plugins, no automation** - "Workspace is a passive domain object only."
+
+### Engineering Decision
+
+- `WorkspaceMetadata`'s own field order follows `ProjectMetadata`'s own established precedent (036) - `created_at, version, correlation_id, owner, tags, extra` - rather than this package's own differently-ordered literal field list, since "Follow the metadata conventions established throughout ArgusOS" now has a direct, exact precedent to follow for this identical six-field composition. See `factory/packages/037_WORKSPACE_FRAMEWORK.md`'s own Engineering Decision section for the full reasoning.
+
+### Known Limitations
+
+- **`Goal` does not exist as a domain object anywhere in this codebase** - the ownership chain `Workspace -> Project -> Goal -> Plan -> Task` has two implemented links, one missing link, and two pre-existing links.
+- **`owner`/`tags` are not settable through `WorkspaceBuilder`** - only via `with_metadata()`'s own `extra` mapping or direct `WorkspaceMetadata` construction.
+- **No transition logic on `WorkspaceStatus`.**
+- No persistence, no concurrency, no scheduling, no runtime behavior of any kind.
