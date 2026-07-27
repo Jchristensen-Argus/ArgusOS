@@ -36,17 +36,29 @@ Construction Sequence - execute() Does Exactly Four Things:
     Version 1 code path that ever considers a Task to have failed, per
     "Every Task is considered successfully processed."
 
-Dependency Boundary - Plan Only, Nothing Else, Not Even At
-Construction:
-    Mirrors ResponseEngine's (027) own "Plan only" dependency shape
-    exactly: `Plan` is not a live service to inject at construction
-    time, but a per-call argument to `execute()` itself.
-    `ExecutionEngine.__init__()` therefore takes no constructor
-    dependency at all - no `IEventBus`, no `IPlanner`, no
-    `ICognitivePipeline`, no `IResponseEngine`, nothing - the second
-    core service in this codebase (after ResponseEngine, 027) for
-    which that is true. See interfaces.py's own Architectural Note for
-    the full ADR-0002 reasoning.
+Dependency Boundary - Plan Per-Call, CapabilityRegistry At
+Construction Only (Package 033 Amendment):
+    Through Package 032, `Plan` was not a live service to inject at
+    construction time, but a per-call argument to `execute()` itself,
+    and `ExecutionEngine.__init__()` took no constructor dependency at
+    all. Package 033's own explicit Integration instruction changes
+    this: "ExecutionEngine receives a reference to CapabilityRegistry
+    but does not use it yet. The dependency exists only to establish
+    future wiring... Modify constructor only... No dispatch. No
+    execution. No lookup. No behavior changes." `__init__()` now
+    accepts `capability_registry: ICapabilityRegistry`, stored as
+    `self._capability_registry` and never read anywhere in this
+    module - `execute()`'s own four-step sequence above is completely
+    unchanged, confirmed by this file's own diff touching only
+    `__init__()`. `ExecutionEngine` was, as of Package 032, the second
+    core service in this codebase's own history with a fully empty
+    constructor (after `ResponseEngine`, 027) - Package 033 ends that
+    for `ExecutionEngine` specifically, while `ResponseEngine` itself
+    remains the sole surviving example, unmodified by this package.
+    See interfaces.py's own Architectural Note for the full ADR-0002
+    reasoning, unchanged in substance by this package - `execute()` is
+    still never gated on lifecycle state, since the new constructor
+    dependency is not (yet) a collaborator `execute()` calls into.
 
 Responsibilities:
     - execute(): transform one Plan into one ExecutionResult, per the
@@ -76,9 +88,12 @@ Dependencies:
     argus.execution_engine.interfaces (IExecutionEngine),
     argus.execution_engine.result (ExecutionResult),
     argus.execution_engine.status (ExecutionStatus),
-    argus.lifecycle.lifecycle (LifecycleState).
+    argus.lifecycle.lifecycle (LifecycleState),
+    argus.capability.interfaces (ICapabilityRegistry) - Package 033,
+    constructor-injected and stored only.
 """
 
+from argus.capability.interfaces import ICapabilityRegistry
 from argus.execution_engine.builder import ExecutionResultBuilder
 from argus.execution_engine.exceptions import ExecutionError, InvalidPlanReferenceError
 from argus.execution_engine.interfaces import IExecutionEngine
@@ -98,12 +113,15 @@ class ExecutionEngine(IExecutionEngine):
         AI. See the module docstring for the full design rationale.
 
     Dependencies:
-        None injected at construction. See the module docstring's
-        "Dependency Boundary" note - `Plan` is a per-call argument to
-        execute(), not a constructor-injected collaborator.
+        As of Package 033, an ICapabilityRegistry implementation,
+        injected by the caller (bootstrap.py) - stored only, never
+        called. See the module docstring's "Dependency Boundary" note
+        - `Plan` remains a per-call argument to execute(), never a
+        constructor-injected collaborator.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, capability_registry: ICapabilityRegistry) -> None:
+        self._capability_registry = capability_registry
         self._state: LifecycleState = LifecycleState.CREATED
 
     # -- IService (see interfaces.py's Architectural Note:

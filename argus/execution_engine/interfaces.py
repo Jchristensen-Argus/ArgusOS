@@ -42,7 +42,31 @@ execute() Is Not Gated:
     history - after `ResponseEngine` (027) - with a fully empty
     constructor, for the identical reason: its own sole "dependency,"
     the `Plan` it processes, is a per-call argument to execute(),
-    never a constructor-injected collaborator.
+    never a constructor-injected collaborator. (Package 033 Amendment
+    - see below: this "empty constructor" fact is historical as of
+    Package 032 and no longer holds after Package 033's own
+    constructor change; the zero-gated-adopter/divergent-case counts
+    above remain accurate and unchanged, since gating behavior itself
+    did not change.)
+
+Architectural Note - Package 033 Amendment - A Constructor Dependency
+Arrives, But Nothing Is Gated On It:
+    Per Package 033's own explicit Integration instruction,
+    `ExecutionEngine.__init__()` now accepts `capability_registry:
+    ICapabilityRegistry` - "ExecutionEngine receives a reference to
+    CapabilityRegistry but does not use it yet. The dependency exists
+    only to establish future wiring... No behavior changes." This ends
+    `ExecutionEngine`'s own brief run (027-032) as this codebase's
+    second fully-empty-constructor core service - `ResponseEngine`
+    (027) remains the sole surviving example - but does NOT change
+    `execute()`'s own gating status: `execute()` still never checks
+    `self._capability_registry`, still never checks lifecycle state,
+    and is still callable in `CREATED`, `RUNNING`, or `STOPPED` alike.
+    `IExecutionEngine` remains the sixth zero-gated IService adopter
+    and the fifth divergent ADR-0002 case, both facts established at
+    Package 032 and unchanged by this one - a constructor gaining a
+    stored-but-unused dependency is not the same thing as a method
+    gaining a gate, and ADR-0002's own criterion is about the latter.
 
 Responsibilities:
     - IExecutionResultBuilder: the contract implemented by

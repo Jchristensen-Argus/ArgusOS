@@ -716,6 +716,20 @@ class BootstrapTests(unittest.TestCase):
         finally:
             application.shutdown()
 
+    def test_bootstrap_execution_engine_receives_the_containers_own_capability_registry(self):
+        # Package 033: "ExecutionEngine receives a reference to
+        # CapabilityRegistry." Confirms real dependency injection - the
+        # same CapabilityRegistry singleton the container itself
+        # resolves, not a separate instance constructed on the side.
+        application = bootstrap()
+
+        try:
+            execution_engine = application.container.resolve("execution_engine")
+            capability_registry = application.container.resolve("capability_registry")
+            self.assertIs(execution_engine._capability_registry, capability_registry)
+        finally:
+            application.shutdown()
+
     def test_bootstrap_execution_engine_executes_a_plan_even_while_unstarted(self):
         # Like ResponseEngine's own build_response(), ExecutionEngine's
         # execute() is never gated (see

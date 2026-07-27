@@ -1294,3 +1294,42 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - **No dependency graph, ordering, or scheduling consequence exists** - a `TaskRelationship` (031) carries no execution consequence in Version 1.
 - **`ExecutionEngine.execute()` is never gated on the service's own lifecycle state** - mirroring `ResponseEngine.build_response()`'s own identical Version 1 shape.
 - No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.
+
+## Package 033 - Capability Framework
+
+### Added
+
+- `argus/capability/metadata.py` (new) - `CapabilityMetadata`, immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`/`TaskMetadata`/`RelationshipMetadata`/`ExecutionMetadata`'s shape and field names exactly (`created_at`, `version`, `correlation_id`, `extra`), continuing the identical field-order-normalization precedent Packages 028, 029, 031, and 032 already applied. `CAPABILITY_METADATA_VERSION = "1.0"`. A pure, dependency-free leaf, matching every sibling metadata module.
+- `argus/capability/builder.py` (new) - `CapabilityBuilder` / `ICapabilityBuilder` (in `argus/capability/interfaces.py`), the first dedicated builder `Capability` (013) has ever had - "Builder is the only mutable object." `with_id()`/`with_name()`/`with_description()`/`with_intent_type()`/`with_intent_types()`/`clear_intent_types()`/`with_action_kind()`/`with_workflow_id()`/`with_enabled()`/`with_version()`/`with_metadata()`/`build()` - a method surface beyond this package's own six-item Responsibilities list, the identical "Responsibilities list under-specifies the method surface" resolution Packages 029, 031, and 032 already applied. `with_id()` is notable: no other builder in this codebase exposes an equivalent for its own object's identity field, included here only because this package's own Responsibilities list explicitly names "assign id."
+- `factory/packages/033_CAPABILITY_FRAMEWORK.md` (new).
+- `tests/test_capability_builder.py` (new, 57 tests), `tests/test_capability_metadata.py` (new, 10 tests).
+
+### Changed
+
+- **`argus/capability/capability.py`** - `Capability` gained two new, additively-defaulted fields: `version: str = "1.0"` and `capability_metadata: CapabilityMetadata = field(default_factory=CapabilityMetadata)`, declared last. Every pre-existing (013) field - `name`, `description`, `intent_types`, `action_kind`, `id`, `workflow_id`, `enabled`, `metadata` - is unchanged in type, default, or position. This package's own work order requested a five-field `capability_id`/`name`/`description`/`version`/`metadata` shape; per the Founder's explicit mid-implementation instruction ("Package 013 already introduced `argus/capability/`. Do not create a parallel package or replace the existing implementation... evolve those classes rather than duplicating them"), the existing eight-field `Capability` was extended in place rather than replaced. `capability_id` is understood to refer to the pre-existing `id` field, not renamed. The work order's own `metadata` (a dedicated value object) is not a retyping of the pre-existing `metadata: Mapping[str, Any]` field - retyping it would break `tests/test_capability.py`'s own `MappingProxyType`/subscript assertions - it is the new `capability_metadata` field instead.
+- **`argus/capability/registry.py`** - `CapabilityRegistry.register()` now also rejects a `name` already registered under a different id, raising the same pre-existing `DuplicateCapabilityError` used for duplicate ids - no new exception type. New method: `get_by_name(name) -> Capability`, mirroring `get(capability_id)`'s own shape and error contract exactly ("lookup by name," per this package's own Responsibilities list). `register`/`unregister`/`get`/`find_by_intent_type`/`list_capabilities`/`contains` and insertion-order preservation are otherwise unchanged.
+- **`argus/capability/interfaces.py`** - `ICapabilityRegistry` gained an abstract `get_by_name()` method; new `ICapabilityBuilder(ABC)` added, not inheriting `IService`, mirroring every other builder interface in this codebase.
+- **`argus/capability/__init__.py`** - re-exports `CapabilityBuilder`, `ICapabilityBuilder`, `CapabilityMetadata`, `CAPABILITY_METADATA_VERSION`.
+- **`argus/execution_engine/engine.py`** - `ExecutionEngine.__init__()` gained a new, required parameter, `capability_registry: ICapabilityRegistry`, stored as `self._capability_registry` and never read anywhere in this module - "No dispatch. No execution. No lookup. No behavior changes... Modify constructor only." `execute()`'s own four-step sequence is completely untouched. Ends `ExecutionEngine`'s own brief run (027-032) as this codebase's second fully-empty-constructor core service - `ResponseEngine` (027) remains the sole surviving example - but does not change `execute()`'s own gating status: `IExecutionEngine` remains the sixth zero-gated `IService` adopter and the fifth divergent ADR-0002 case, both facts established at Package 032 and unchanged here.
+- **`argus/bootstrap.py`** - `ExecutionEngine(capability_registry=capability_registry)`, passing the already-constructed `capability_registry` singleton. No new core service was registered - `CapabilityRegistry` has been a core service since Package 013; this package only changes what one *other* core service's constructor receives. `CORE_SERVICES_VERSION` remains `"0.3.2"`, not advanced by this package.
+- **`tests/test_capability.py`** (+10), **`tests/test_capability_registry.py`** (+9), **`tests/test_execution_engine.py`** (+3, rewritten throughout for constructor injection), **`tests/test_bootstrap.py`** (+1), **`tests/test_agent_service.py`** (updated in place, every `ExecutionEngine()` construction now supplies `capability_registry`), **`tests/test_planner.py`** (2 pre-existing fixtures given distinct names, breaking change from the new duplicate-name rejection - see Known Limitations).
+
+### Not Changed
+
+- **No parallel `argus/capability/` package was created** - per the Founder's explicit directive, the existing Package 013 package remains the single source of truth for capabilities; every pre-existing consumer (`IntentDispatcher`, `Planner`, `PluginManager`, `ConnectorManager`, `AgentRuntime`, `KnowledgeGraph`) is untouched.
+- **No Task changes. No Plan changes. No Pipeline redesign. No Response redesign. No Runtime redesign. No ExecutionTrace changes.** Confirmed via `git diff --stat` showing zero lines changed in `argus/task/`, `argus/task_relationship/`, `argus/planner/`, `argus/planning/`, `argus/pipeline/`, `argus/response/`, `argus/trace/`, `argus/runtime/`.
+- **No plugins, no persistence, no AI, no tools or APIs called** - "No real work is performed. No tools are invoked. No AI is called. No external APIs are used."
+- **`argus/events/event_types.py` was intentionally left unchanged** - `CAPABILITY_REGISTERED`/`CAPABILITY_UNREGISTERED` already existed (013) and continue to fire unchanged.
+- **`argus/tests/test_bootstrap.py` is unchanged** - no new core service was registered this package.
+
+### ADR Update
+
+- None. This package introduces no new `IService` adopter and changes no adopter's own gating behavior, only a constructor's dependency list - the same "no ADR-0002 entry" precedent already set by Packages 022, 023, 028, 029, and 031.
+
+### Known Limitations
+
+- **No dispatch model exists yet** - `ExecutionEngine` holds a `CapabilityRegistry` reference but never calls any of its methods; nothing in this codebase yet resolves a `Task` to a `Capability` or invokes one.
+- **Two distinct "metadata" concepts now coexist on `Capability`** - the pre-existing (013) `metadata: Mapping[str, Any]` and the new (033) `capability_metadata: CapabilityMetadata` are never merged or reconciled into one field, a direct, documented consequence of prioritizing backward compatibility over a clean single-metadata-field design.
+- **`capability_id` is not a real field name anywhere in this codebase** - it is a documented alias for the pre-existing `id` field.
+- **Duplicate-name rejection broke two pre-existing tests in `tests/test_planner.py`** - both registered three Capabilities sharing a default name within a single registry; fixed by giving each a distinct name, confirmed via a full `python -m pytest` run to be the only two affected tests anywhere in the repository.
+- No execution, no scheduling, no persistence, no concurrency - unchanged from every prior package in this phase.

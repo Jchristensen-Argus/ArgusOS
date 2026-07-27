@@ -32,6 +32,15 @@ def _silent_logger() -> logging.Logger:
     return logger
 
 
+def _capability_registry() -> CapabilityRegistry:
+    # Package 033: ExecutionEngine's constructor now requires a
+    # CapabilityRegistry - stored only, never called (see
+    # ConstructorInjectionTests in tests/test_execution_engine.py for
+    # the dedicated confirmation of that non-usage). A fresh, empty
+    # registry is sufficient for every test in this file.
+    return CapabilityRegistry(event_bus=InMemoryEventBus(logger=_silent_logger()))
+
+
 def _real_pipeline() -> CognitivePipeline:
     bus = InMemoryEventBus(logger=_silent_logger())
     registry = CapabilityRegistry(event_bus=bus)
@@ -118,7 +127,7 @@ class RaisingResponseEngine:
 def _started_service(pipeline=None, execution_engine=None, response_engine=None) -> AgentService:
     service = AgentService(
         cognitive_pipeline=pipeline or _real_pipeline(),
-        execution_engine=execution_engine or ExecutionEngine(),
+        execution_engine=execution_engine or ExecutionEngine(capability_registry=_capability_registry()),
         response_engine=response_engine or ResponseEngine(),
     )
     service.initialize()
@@ -135,7 +144,7 @@ class AgentServiceIdentityTests(unittest.TestCase):
 
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         self.assertIsInstance(service, IAgentService)
@@ -143,7 +152,7 @@ class AgentServiceIdentityTests(unittest.TestCase):
     def test_is_an_iservice(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         self.assertIsInstance(service, IService)
@@ -151,7 +160,7 @@ class AgentServiceIdentityTests(unittest.TestCase):
     def test_starts_in_created_state(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         self.assertEqual(service.status(), LifecycleState.CREATED)
@@ -161,7 +170,7 @@ class AgentServiceIdentityTests(unittest.TestCase):
         # response_engine.
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         self.assertIsInstance(service, AgentService)
@@ -174,7 +183,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_initialize_transitions_to_initializing(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         service.initialize()
@@ -183,7 +192,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_initialize_twice_raises(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         service.initialize()
@@ -193,7 +202,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_start_requires_initializing(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         with self.assertRaises(AgentError):
@@ -202,7 +211,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_start_transitions_to_running(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         service.initialize()
@@ -212,7 +221,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_stop_requires_running(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         with self.assertRaises(AgentError):
@@ -226,7 +235,7 @@ class AgentServiceLifecycleTests(unittest.TestCase):
     def test_status_reflects_current_state_throughout(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         self.assertEqual(service.status(), LifecycleState.CREATED)
@@ -249,7 +258,7 @@ class RunValidationTests(unittest.TestCase):
     def test_run_before_started_raises_agent_error(self):
         service = AgentService(
             cognitive_pipeline=_real_pipeline(),
-            execution_engine=ExecutionEngine(),
+            execution_engine=ExecutionEngine(capability_registry=_capability_registry()),
             response_engine=ResponseEngine(),
         )
         with self.assertRaises(AgentError):

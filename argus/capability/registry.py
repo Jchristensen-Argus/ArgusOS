@@ -5,20 +5,51 @@ ICapabilityRegistry for the ArgusOS Capability Registry.
 Purpose:
     Implement ICapabilityRegistry: store, validate, and let callers
     discover Capability metadata, per
-    factory/packages/013_CAPABILITY_REGISTRY.md. The registry performs
-    NO execution - it never constructs, obtains, or calls an Action,
-    and never touches IWorkflowEngine or any other execution backend.
+    factory/packages/013_CAPABILITY_REGISTRY.md, as amended by
+    factory/packages/033_CAPABILITY_FRAMEWORK.md ("lookup by name",
+    "Duplicate names are rejected"). The registry performs NO
+    execution - it never constructs, obtains, or calls an Action, and
+    never touches IWorkflowEngine or any other execution backend.
+
+Package 033 Amendment - get_by_name() And Duplicate-Name Rejection:
+    "CapabilityRegistry Responsibilities: ... lookup by name ...
+    Duplicate names are rejected." Two additive changes: a new
+    `get_by_name(name)` method (mirroring `get(capability_id)`'s own
+    shape and error contract exactly), and `register()` now also
+    rejects a `name` that is already registered under a *different*
+    id, raising the same `DuplicateCapabilityError` `register()`
+    already raises for a duplicate id - no new exception type was
+    needed. Re-registering under a name that was freed by a prior
+    `unregister()` call still succeeds, exactly like the pre-existing
+    (013) duplicate-id-after-unregister behavior.
+
+    This is a genuine, additive behavior change to `register()`
+    itself, not a new opt-in method - per the Founder's own explicit
+    instruction ("If ... the registry lacks required behaviors,
+    evolve those classes"). One pre-existing test,
+    `tests/test_planner.py`, registered three Capabilities sharing the
+    same default name ("Answer") under three different ids within a
+    single registry - a pattern this amendment necessarily forbids.
+    Fixed by giving each of those three test fixtures its own distinct
+    name (`"Answer 1"`/`"Answer 2"`/`"Answer 3"`), the same "the test
+    itself, not the design, needed to change" situation this
+    codebase's own regression suite exists to catch (see Package 031's
+    own identical precedent for `tests/test_task.py`'s
+    `NoExecutableLogicTests`). No other pre-existing test constructs
+    two Capabilities sharing a name within the same registry instance.
 
 Responsibilities:
-    - register / unregister / get / find_by_intent_type /
-      list_capabilities / contains: an in-memory registry of
-      Capability objects, keyed by id. All six methods are always
-      available - CapabilityRegistry is not an IService adopter (see
+    - register / unregister / get / get_by_name (Package 033) /
+      find_by_intent_type / list_capabilities / contains: an in-memory
+      registry of Capability objects, keyed by id (and, for
+      get_by_name(), by name). All seven methods are always available
+      - CapabilityRegistry is not an IService adopter (see
       argus/capability/interfaces.py's Architectural Note), so there
       is no lifecycle state to gate any of them on.
     - register() validates a Capability's fields before accepting it
-      (non-empty id/name/intent_types/action_kind, and a workflow_id
-      when action_kind is "workflow") - the one piece of business
+      (non-empty id/name/intent_types/action_kind, a workflow_id when
+      action_kind is "workflow", a non-duplicate id, and, as of
+      Package 033, a non-duplicate name) - the one piece of business
       logic this module contains, and it is validation, not
       execution, matching the precedent set by
       WorkflowEngine.register_workflow()'s own inline validation
@@ -94,6 +125,12 @@ class CapabilityRegistry(ICapabilityRegistry):
             raise DuplicateCapabilityError(
                 f"A capability with id {capability.id!r} is already registered."
             )
+        for existing in self._capabilities.values():
+            if existing.name == capability.name:
+                raise DuplicateCapabilityError(
+                    f"A capability named {capability.name!r} is already "
+                    f"registered (id={existing.id!r}) - Package 033."
+                )
         self._capabilities[capability.id] = capability
         self._publish(
             EventType.CAPABILITY_REGISTERED,
@@ -110,6 +147,20 @@ class CapabilityRegistry(ICapabilityRegistry):
 
     def get(self, capability_id: str) -> Capability:
         return self._require_capability(capability_id)
+
+    def get_by_name(self, name: str) -> Capability:
+        # Package 033 - "lookup by name". Mirrors get()'s own error
+        # contract exactly.
+        if not isinstance(name, str):
+            raise InvalidCapabilityError(
+                f"name must be a string, got {name!r}."
+            )
+        for capability in self._capabilities.values():
+            if capability.name == name:
+                return capability
+        raise CapabilityNotFoundError(
+            f"No capability registered with name {name!r}."
+        )
 
     def find_by_intent_type(self, intent_type: IntentType) -> Sequence[Capability]:
         if not isinstance(intent_type, IntentType):

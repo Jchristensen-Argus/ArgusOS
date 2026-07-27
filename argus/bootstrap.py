@@ -454,10 +454,13 @@ Startup Sequence:
         start() are deliberately NOT called by this package, for the
         same divergence-avoidance reasoning recorded in ADR-0002 and
         already applied to every prior adopter.
-    24. Construct the Execution Engine (depends on nothing) and
-        register it with the Container, per Package 032. Bootstrap is
-        the only place that constructs ExecutionEngine directly; every
-        other subsystem must resolve it from the Container.
+    24. Construct the Execution Engine (depends, as of Package 033,
+        on the already-constructed CapabilityRegistry - stored only,
+        never called; see argus.execution_engine.engine's own module
+        docstring) and register it with the Container, per Package
+        032, amended by Package 033. Bootstrap is the only place that
+        constructs ExecutionEngine directly; every other subsystem
+        must resolve it from the Container.
         Constructed immediately after the Cognitive Pipeline and
         immediately before the Response Engine, per the Bootstrap
         section's explicit dependency order ("Planner -> Pipeline ->
@@ -789,7 +792,7 @@ def bootstrap() -> Application:
     cognitive_pipeline = CognitivePipeline(planner=planner)
     container.register("cognitive_pipeline", cognitive_pipeline)
 
-    execution_engine = ExecutionEngine()
+    execution_engine = ExecutionEngine(capability_registry=capability_registry)
     container.register("execution_engine", execution_engine)
 
     response_engine = ResponseEngine()

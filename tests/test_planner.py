@@ -328,9 +328,13 @@ class RemoveStepTests(PlannerTestCase):
             self.planner.remove_step("missing-plan", self.plan.steps[0].id)
 
     def test_resets_status_to_created(self):
-        self.capability_registry.register(_capability(id="cap-1"))
-        self.capability_registry.register(_capability(id="cap-2"))
-        self.capability_registry.register(_capability(id="cap-3"))
+        # Package 033: CapabilityRegistry now rejects duplicate names,
+        # not just duplicate ids - each of these three needs its own
+        # distinct name, since they previously all shared _capability()'s
+        # own default name ("Answer").
+        self.capability_registry.register(_capability(id="cap-1", name="Answer 1"))
+        self.capability_registry.register(_capability(id="cap-2", name="Answer 2"))
+        self.capability_registry.register(_capability(id="cap-3", name="Answer 3"))
         validated = self.planner.validate_plan(self.plan.id)
         self.assertEqual(validated.status, PlanStatus.VALIDATED)
 
@@ -403,9 +407,13 @@ class ReorderStepsTests(PlannerTestCase):
             self.planner.reorder_steps("missing-plan", self.ids)
 
     def test_resets_status_to_created(self):
-        self.capability_registry.register(_capability(id="cap-1"))
-        self.capability_registry.register(_capability(id="cap-2"))
-        self.capability_registry.register(_capability(id="cap-3"))
+        # Package 033: CapabilityRegistry now rejects duplicate names,
+        # not just duplicate ids - each of these three needs its own
+        # distinct name, since they previously all shared _capability()'s
+        # own default name ("Answer").
+        self.capability_registry.register(_capability(id="cap-1", name="Answer 1"))
+        self.capability_registry.register(_capability(id="cap-2", name="Answer 2"))
+        self.capability_registry.register(_capability(id="cap-3", name="Answer 3"))
         validated = self.planner.validate_plan(self.plan.id)
         self.assertEqual(validated.status, PlanStatus.VALIDATED)
 

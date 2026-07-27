@@ -119,12 +119,47 @@ class RegisterTests(RegistryTestCase):
         with self.assertRaises(DuplicateCapabilityError):
             self.registry.register(_capability(id="dup-id"))
 
+    def test_duplicate_name_raises(self):
+        # Package 033: "Duplicate names are rejected." A different id
+        # does not exempt a colliding name.
+        self.registry.register(_capability(id="first", name="Answer"))
+
+        with self.assertRaises(DuplicateCapabilityError):
+            self.registry.register(_capability(id="second", name="Answer"))
+
+    def test_duplicate_name_does_not_register_the_second_capability(self):
+        self.registry.register(_capability(id="first", name="Answer"))
+
+        with self.assertRaises(DuplicateCapabilityError):
+            self.registry.register(_capability(id="second", name="Answer"))
+
+        self.assertFalse(self.registry.contains("second"))
+        self.assertEqual(len(self.registry.list_capabilities()), 1)
+
+    def test_distinct_names_do_not_collide(self):
+        self.registry.register(_capability(id="first", name="Answer"))
+        self.registry.register(_capability(id="second", name="Different"))  # must not raise
+
+        self.assertEqual(len(self.registry.list_capabilities()), 2)
+
     def test_register_after_unregister_succeeds(self):
         capability = _capability(id="reused-id")
         self.registry.register(capability)
         self.registry.unregister(capability.id)
 
         self.registry.register(_capability(id="reused-id"))  # must not raise
+
+    def test_register_after_unregister_frees_the_name_too(self):
+        # Package 033: unregistering a capability frees both its own
+        # id and its own name for reuse.
+        capability = _capability(id="original-id", name="Answer")
+        self.registry.register(capability)
+        self.registry.unregister(capability.id)
+
+        self.registry.register(
+            _capability(id="new-id", name="Answer")
+        )  # must not raise
+        self.assertTrue(self.registry.contains("new-id"))
 
     def test_register_publishes_capability_registered(self):
         capability = _capability()
@@ -198,6 +233,41 @@ class GetTests(RegistryTestCase):
     def test_get_unknown_id_raises(self):
         with self.assertRaises(CapabilityNotFoundError):
             self.registry.get("missing")
+
+
+# -- get_by_name() (Package 033) ------------------------------------------
+
+
+class GetByNameTests(RegistryTestCase):
+    def test_get_by_name_returns_registered_capability(self):
+        capability = _capability(name="Answer")
+        self.registry.register(capability)
+
+        self.assertIs(self.registry.get_by_name("Answer"), capability)
+
+    def test_get_by_name_rejects_non_string(self):
+        with self.assertRaises(InvalidCapabilityError):
+            self.registry.get_by_name(123)
+
+    def test_get_by_name_unknown_name_raises(self):
+        with self.assertRaises(CapabilityNotFoundError):
+            self.registry.get_by_name("missing")
+
+    def test_get_by_name_after_unregister_raises(self):
+        capability = _capability(name="Answer")
+        self.registry.register(capability)
+        self.registry.unregister(capability.id)
+
+        with self.assertRaises(CapabilityNotFoundError):
+            self.registry.get_by_name("Answer")
+
+    def test_get_by_name_does_not_publish_events(self):
+        self.registry.register(_capability(name="Answer"))
+        self.received.clear()
+
+        self.registry.get_by_name("Answer")
+
+        self.assertEqual(self.received, [])
 
 
 # -- find_by_intent_type() -------------------------------------------------------------
