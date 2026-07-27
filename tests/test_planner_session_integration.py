@@ -21,6 +21,8 @@ from argus.events import EventType, InMemoryEventBus
 from argus.intent import Intent, IntentType
 from argus.planner import InvalidPlanError, PlanStatus, Planner
 from argus.planning import PlanningConstraint, PlanningGoal, PlanningSessionBuilder
+from argus.task.builder import TaskBuilder
+from argus.task.task import Task
 
 
 def _silent_logger() -> logging.Logger:
@@ -196,6 +198,55 @@ class MultipleConstraintsTests(PlannerSessionIntegrationTestCase):
         self.assertEqual(plan.steps, ())  # constraints alone produce no steps
 
 
+# -- session.tasks carry-through (Package 030) -------------------------
+
+
+class SessionTasksIntegrationTests(PlannerSessionIntegrationTestCase):
+    def test_empty_session_produces_plan_with_no_tasks(self):
+        session = PlanningSessionBuilder().build()
+        plan = self.planner.plan_session(session)
+        self.assertEqual(plan.tasks, ())
+
+    def test_single_task_carried_through_to_plan(self):
+        task = TaskBuilder().with_name("t1").build()
+        session = PlanningSessionBuilder().with_task(task).build()
+        plan = self.planner.plan_session(session)
+        self.assertEqual(plan.tasks, (task,))
+
+    def test_multiple_tasks_carried_through_preserving_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+        session = PlanningSessionBuilder().with_tasks([t1, t2, t3]).build()
+        plan = self.planner.plan_session(session)
+        self.assertEqual(plan.tasks, (t1, t2, t3))
+
+    def test_tasks_carried_through_alongside_goals_and_constraints(self):
+        goal = PlanningGoal(name="cap_a")
+        constraint = PlanningConstraint(name="budget")
+        task = TaskBuilder().with_name("t1").build()
+        session = (
+            PlanningSessionBuilder()
+            .with_goal(goal)
+            .with_constraint(constraint)
+            .with_task(task)
+            .build()
+        )
+        plan = self.planner.plan_session(session)
+        self.assertEqual(plan.tasks, (task,))
+        self.assertEqual(len(plan.steps), 1)  # unrelated: goal still becomes a step
+
+    def test_planner_never_generates_tasks_of_its_own(self):
+        # plan_session() carries whatever tasks the PlanningSession
+        # already has - it never fabricates, decomposes, or derives
+        # any Task from goals/constraints.
+        session = (
+            PlanningSessionBuilder().with_goal(PlanningGoal(name="cap_a")).build()
+        )
+        plan = self.planner.plan_session(session)
+        self.assertEqual(plan.tasks, ())
+
+
 # -- immutable behavior -------------------------------------------------
 
 
@@ -234,6 +285,20 @@ class ImmutableBehaviorTests(PlannerSessionIntegrationTestCase):
         self.planner.plan_session(session)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             context.conversation_id = "changed"
+
+    def test_task_remains_frozen_after_plan_session(self):
+        task = TaskBuilder().with_name("t1").build()
+        session = PlanningSessionBuilder().with_task(task).build()
+        self.planner.plan_session(session)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            task.name = "changed"
+
+    def test_session_tasks_tuple_unaffected_by_plan_session(self):
+        task = TaskBuilder().with_name("t1").build()
+        session = PlanningSessionBuilder().with_task(task).build()
+        before_tasks = session.tasks
+        self.planner.plan_session(session)
+        self.assertEqual(session.tasks, before_tasks)
 
 
 # -- delegation path ----------------------------------------------------

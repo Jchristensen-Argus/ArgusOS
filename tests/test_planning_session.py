@@ -9,6 +9,7 @@ from argus.planning.constraint import PlanningConstraint
 from argus.planning.goal import PlanningGoal
 from argus.planning.metadata import PlanningMetadata
 from argus.planning.session import PlanningSession
+from argus.task.builder import TaskBuilder
 
 
 def _fixed_metadata(correlation_id="corr-1"):
@@ -26,6 +27,7 @@ class PlanningSessionEmptyTests(unittest.TestCase):
         self.assertIsNone(session.cognitive_context)
         self.assertEqual(session.goals, ())
         self.assertEqual(session.constraints, ())
+        self.assertEqual(session.tasks, ())
         self.assertIsInstance(session.metadata, PlanningMetadata)
 
     def test_empty_session_has_generated_session_id(self):
@@ -49,18 +51,28 @@ class PlanningSessionPopulatedTests(unittest.TestCase):
         context = CognitiveContext(conversation_id="conv-1")
         goal = PlanningGoal(name="goal-1")
         constraint = PlanningConstraint(name="constraint-1")
+        task = TaskBuilder().with_name("t1").build()
         session = PlanningSession(
             session_id="session-1",
             cognitive_context=context,
             goals=[goal],
             constraints=[constraint],
+            tasks=[task],
             metadata=_fixed_metadata(),
         )
         self.assertEqual(session.session_id, "session-1")
         self.assertIs(session.cognitive_context, context)
         self.assertEqual(session.goals, (goal,))
         self.assertEqual(session.constraints, (constraint,))
+        self.assertEqual(session.tasks, (task,))
         self.assertEqual(session.metadata, _fixed_metadata())
+
+    def test_multiple_tasks_preserve_insertion_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+        session = PlanningSession(tasks=[t1, t2, t3])
+        self.assertEqual(session.tasks, (t1, t2, t3))
 
     def test_multiple_goals_preserve_call_order_regardless_of_priority(self):
         low_priority_first = PlanningGoal(name="first", priority=100)
@@ -78,15 +90,24 @@ class PlanningSessionPopulatedTests(unittest.TestCase):
         session = PlanningSession(
             goals=[PlanningGoal(name="g1")],
             constraints=[PlanningConstraint(name="c1")],
+            tasks=[TaskBuilder().with_name("t1").build()],
         )
         self.assertIsInstance(session.goals, tuple)
         self.assertIsInstance(session.constraints, tuple)
+        self.assertIsInstance(session.tasks, tuple)
 
     def test_sequence_fields_defensive_copy_not_shared_with_caller(self):
         source = [PlanningGoal(name="g1")]
         session = PlanningSession(goals=source)
         source.append(PlanningGoal(name="g2"))
         self.assertEqual(len(session.goals), 1)
+
+    def test_tasks_defensive_copy_not_shared_with_caller(self):
+        task = TaskBuilder().with_name("t1").build()
+        source = [task]
+        session = PlanningSession(tasks=source)
+        source.append(TaskBuilder().with_name("t2").build())
+        self.assertEqual(session.tasks, (task,))
 
     def test_cognitive_context_is_held_directly_not_copied(self):
         context = CognitiveContext(conversation_id="conv-1")
@@ -110,6 +131,16 @@ class PlanningSessionImmutabilityTests(unittest.TestCase):
         session = PlanningSession(goals=[PlanningGoal(name="g1")])
         with self.assertRaises(AttributeError):
             session.goals.append(PlanningGoal(name="g2"))
+
+    def test_tasks_tuple_cannot_be_mutated_in_place(self):
+        session = PlanningSession(tasks=[TaskBuilder().with_name("t1").build()])
+        with self.assertRaises(AttributeError):
+            session.tasks.append(TaskBuilder().with_name("t2").build())
+
+    def test_cannot_reassign_tasks(self):
+        session = PlanningSession()
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            session.tasks = ()
 
     def test_contained_cognitive_context_remains_immutable(self):
         context = CognitiveContext(conversation_id="conv-1")

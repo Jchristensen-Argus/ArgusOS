@@ -9,6 +9,8 @@ from argus.planning.exceptions import InvalidPlanningSessionError
 from argus.planning.goal import PlanningGoal
 from argus.planning.interfaces import IPlanningSessionBuilder
 from argus.planning.session import PlanningSession
+from argus.task.builder import TaskBuilder
+from argus.task.task import Task
 
 
 class PlanningSessionBuilderInterfaceTests(unittest.TestCase):
@@ -28,6 +30,7 @@ class PlanningSessionBuilderEmptyTests(unittest.TestCase):
         self.assertIsNone(session.cognitive_context)
         self.assertEqual(session.goals, ())
         self.assertEqual(session.constraints, ())
+        self.assertEqual(session.tasks, ())
         self.assertEqual(dict(session.metadata.extra), {})
 
 
@@ -38,22 +41,28 @@ class PlanningSessionBuilderChainingTests(unittest.TestCase):
         self.assertIs(builder.with_goal(PlanningGoal(name="g1")), builder)
         self.assertIs(builder.with_constraint(PlanningConstraint(name="c1")), builder)
         self.assertIs(builder.with_metadata("key", "value"), builder)
+        self.assertIs(builder.with_task(TaskBuilder().with_name("t1").build()), builder)
+        self.assertIs(builder.with_tasks([TaskBuilder().with_name("t2").build()]), builder)
+        self.assertIs(builder.clear_tasks(), builder)
 
     def test_full_fluent_chain_produces_populated_session(self):
         context = CognitiveContext(conversation_id="conv-1")
         goal = PlanningGoal(name="g1")
         constraint = PlanningConstraint(name="c1")
+        task = TaskBuilder().with_name("t1").build()
         session = (
             PlanningSessionBuilder()
             .with_context(context)
             .with_goal(goal)
             .with_constraint(constraint)
+            .with_task(task)
             .with_metadata("foo", "bar")
             .build()
         )
         self.assertIs(session.cognitive_context, context)
         self.assertEqual(session.goals, (goal,))
         self.assertEqual(session.constraints, (constraint,))
+        self.assertEqual(session.tasks, (task,))
         self.assertEqual(dict(session.metadata.extra), {"foo": "bar"})
 
     def test_goals_accumulate_across_calls(self):
@@ -65,6 +74,90 @@ class PlanningSessionBuilderChainingTests(unittest.TestCase):
         c1, c2 = PlanningConstraint(name="c1"), PlanningConstraint(name="c2")
         session = PlanningSessionBuilder().with_constraint(c1).with_constraint(c2).build()
         self.assertEqual(session.constraints, (c1, c2))
+
+    def test_with_task_on_empty_builder_produces_single_task(self):
+        task = TaskBuilder().with_name("t1").build()
+        session = PlanningSessionBuilder().with_task(task).build()
+        self.assertEqual(session.tasks, (task,))
+
+    def test_tasks_accumulate_across_calls_preserving_insertion_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+        session = PlanningSessionBuilder().with_task(t1).with_task(t2).with_task(t3).build()
+        self.assertEqual(session.tasks, (t1, t2, t3))
+
+    def test_with_tasks_adds_multiple_in_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        session = PlanningSessionBuilder().with_tasks([t1, t2]).build()
+        self.assertEqual(session.tasks, (t1, t2))
+
+    def test_with_tasks_combines_with_prior_with_task_calls(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+        session = (
+            PlanningSessionBuilder().with_task(t1).with_tasks([t2, t3]).build()
+        )
+        self.assertEqual(session.tasks, (t1, t2, t3))
+
+    def test_clear_tasks_empties_previously_added_tasks(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        session = PlanningSessionBuilder().with_task(t1).clear_tasks().build()
+        self.assertEqual(session.tasks, ())
+
+    def test_clear_tasks_then_re_add_produces_only_new_tasks(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        session = (
+            PlanningSessionBuilder().with_task(t1).clear_tasks().with_task(t2).build()
+        )
+        self.assertEqual(session.tasks, (t2,))
+
+    def test_with_task_rejects_duplicate_task_id_same_object(self):
+        task = TaskBuilder().with_name("t1").build()
+        builder = PlanningSessionBuilder().with_task(task)
+        with self.assertRaises(InvalidPlanningSessionError):
+            builder.with_task(task)
+
+    def test_with_task_rejects_duplicate_task_id_different_object(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+        builder = PlanningSessionBuilder().with_task(task)
+        with self.assertRaises(InvalidPlanningSessionError):
+            builder.with_task(duplicate)
+
+    def test_with_tasks_rejects_duplicate_task_id_within_the_batch(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+        with self.assertRaises(InvalidPlanningSessionError):
+            PlanningSessionBuilder().with_tasks([task, duplicate])
+
+    def test_with_tasks_rejects_duplicate_task_id_against_prior_with_task_call(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+        builder = PlanningSessionBuilder().with_task(task)
+        with self.assertRaises(InvalidPlanningSessionError):
+            builder.with_tasks([duplicate])
+
+    def test_with_task_rejects_non_task(self):
+        with self.assertRaises(InvalidPlanningSessionError):
+            PlanningSessionBuilder().with_task("not a task")
+
+    def test_with_task_rejects_none(self):
+        with self.assertRaises(InvalidPlanningSessionError):
+            PlanningSessionBuilder().with_task(None)
+
+    def test_with_tasks_rejects_non_list_or_tuple(self):
+        with self.assertRaises(InvalidPlanningSessionError):
+            PlanningSessionBuilder().with_tasks("not a list")
+
+    def test_with_tasks_accepts_tuple(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        session = PlanningSessionBuilder().with_tasks((t1, t2)).build()
+        self.assertEqual(session.tasks, (t1, t2))
 
     def test_context_last_call_wins(self):
         first = CognitiveContext(conversation_id="first")

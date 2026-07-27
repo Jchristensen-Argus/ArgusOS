@@ -15,6 +15,8 @@ from argus.planner import (
     Planner,
     StepNotFoundError,
 )
+from argus.task.builder import TaskBuilder
+from argus.task.task import Task
 
 
 def _silent_logger() -> logging.Logger:
@@ -126,6 +128,88 @@ class CreatePlanTests(PlannerTestCase):
     def test_failed_create_does_not_publish(self):
         with self.assertRaises(InvalidPlanError):
             self.planner.create_plan(object())
+
+        self.assertEqual(self.received, [])
+
+
+# -- create_plan() tasks (Package 030) ----------------------------------------
+
+
+class CreatePlanTasksTests(PlannerTestCase):
+    def test_tasks_default_to_empty_tuple(self):
+        plan = self.planner.create_plan(_intent())
+
+        self.assertEqual(plan.tasks, ())
+
+    def test_honors_single_task(self):
+        task = TaskBuilder().with_name("t1").build()
+
+        plan = self.planner.create_plan(_intent(), tasks=[task])
+
+        self.assertEqual(plan.tasks, (task,))
+
+    def test_honors_multiple_tasks_preserving_insertion_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+
+        plan = self.planner.create_plan(_intent(), tasks=[t1, t2, t3])
+
+        self.assertEqual(plan.tasks, (t1, t2, t3))
+
+    def test_tasks_wrapped_in_tuple(self):
+        task = TaskBuilder().with_name("t1").build()
+
+        plan = self.planner.create_plan(_intent(), tasks=[task])
+
+        self.assertIsInstance(plan.tasks, tuple)
+
+    def test_rejects_duplicate_task_id(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+
+        with self.assertRaises(InvalidPlanError):
+            self.planner.create_plan(_intent(), tasks=[task, duplicate])
+
+    def test_rejects_non_task_item(self):
+        with self.assertRaises(InvalidPlanError):
+            self.planner.create_plan(_intent(), tasks=["not a task"])
+
+    def test_rejects_non_list_or_tuple(self):
+        with self.assertRaises(InvalidPlanError):
+            self.planner.create_plan(_intent(), tasks="not a list")
+
+    def test_accepts_tuple_of_tasks(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+
+        plan = self.planner.create_plan(_intent(), tasks=(t1, t2))
+
+        self.assertEqual(plan.tasks, (t1, t2))
+
+    def test_does_not_generate_tasks_automatically(self):
+        # Planner never creates Tasks on its own - create_plan()
+        # without a tasks= argument produces an empty tasks tuple,
+        # exactly like its pre-030 default.
+        plan = self.planner.create_plan(_intent())
+
+        self.assertEqual(plan.tasks, ())
+
+    def test_failed_task_validation_does_not_store_plan(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+
+        with self.assertRaises(InvalidPlanError):
+            self.planner.create_plan(_intent(), tasks=[task, duplicate])
+
+        self.assertEqual(self.planner.list_plans(), ())
+
+    def test_failed_task_validation_does_not_publish(self):
+        task = TaskBuilder().with_name("t1").build()
+        duplicate = Task(task_id=task.task_id, name="different-name")
+
+        with self.assertRaises(InvalidPlanError):
+            self.planner.create_plan(_intent(), tasks=[task, duplicate])
 
         self.assertEqual(self.received, [])
 

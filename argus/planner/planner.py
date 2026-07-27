@@ -15,6 +15,27 @@ Purpose:
     factory/packages/024_PLANNER_SESSION_INTEGRATION.md - see this
     module's own "plan_session()" section further down.
 
+Package 030 Amendment - Plans Can Contain Tasks:
+    "Update Planner so that Plans can contain Tasks. Do not generate
+    tasks automatically. The Planner simply preserves whatever Tasks
+    are supplied during construction. No planning logic changes. No
+    AI. No decomposition." create_plan() gained one new optional
+    keyword parameter, `tasks: Optional[Sequence[Task]] = None`,
+    validated by the new _validate_tasks() helper (isinstance checks
+    plus duplicate-`task_id` rejection - "no duplicates," Package
+    030's own explicit Plan requirement) and stored on the constructed
+    Plan unchanged - no step is generated from a Task, no Task is
+    generated from a step, and no existing planning behavior (goal-
+    to-step mapping, constraint-to-metadata mapping, validation) is
+    touched. plan_session() was amended identically to how it already
+    carries `constraints` through onto `Plan.metadata` (Package 024):
+    it now also passes `tasks=planning_session.tasks` straight through
+    to create_plan(), so a Plan built from a PlanningSession carries
+    forward whatever Tasks that session already held - itself either
+    empty, or populated via PlanningSessionBuilder.with_task()/
+    with_tasks() (argus.planning.builder, Package 030's own other
+    amendment).
+
 Responsibilities:
     - create_plan / add_step / remove_step / reorder_steps /
       validate_plan / get_plan / list_plans: an in-memory registry of
@@ -131,11 +152,13 @@ Dependencies:
     for validate_plan()'s read-only existence check only),
     argus.intent.intent (Intent), argus.events (Event, EventType,
     IEventBus), argus.planning.session (PlanningSession) - Package
-    024, the immutable contract only, for plan_session().
+    024, the immutable contract only, for plan_session() -
+    argus.task.task (Task) - Package 030, the immutable contract
+    only, for create_plan()'s own tasks parameter.
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from argus.capability.interfaces import ICapabilityRegistry
 from argus.events.event import Event
@@ -152,6 +175,7 @@ from argus.planner.interfaces import IPlanner
 from argus.planner.plan import Plan, PlanStatus
 from argus.planner.step import PlanStep
 from argus.planning.session import PlanningSession
+from argus.task.task import Task
 
 
 class Planner(IPlanner):
@@ -181,7 +205,9 @@ class Planner(IPlanner):
             )
         intent = self._synthesize_intent_for_session(planning_session)
         plan = self.create_plan(
-            intent, metadata=self._session_plan_metadata(planning_session)
+            intent,
+            metadata=self._session_plan_metadata(planning_session),
+            tasks=planning_session.tasks,
         )
         for goal in planning_session.goals:
             plan = self.add_step(
@@ -192,10 +218,20 @@ class Planner(IPlanner):
             )
         return plan
 
-    def create_plan(self, intent: Intent, *, metadata: Optional[dict] = None) -> Plan:
+    def create_plan(
+        self,
+        intent: Intent,
+        *,
+        metadata: Optional[dict] = None,
+        tasks: Optional[Sequence[Task]] = None,
+    ) -> Plan:
         if not isinstance(intent, Intent):
             raise InvalidPlanError(f"create_plan() requires an Intent, got {intent!r}.")
-        plan = Plan(originating_intent=intent, metadata=metadata or {})
+        plan = Plan(
+            originating_intent=intent,
+            metadata=metadata or {},
+            tasks=self._validate_tasks(tasks),
+        )
         self._plans[plan.id] = plan
         self._publish(EventType.PLAN_CREATED, {"plan_id": plan.id})
         return plan
@@ -339,6 +375,34 @@ class Planner(IPlanner):
             for constraint in planning_session.constraints
         )
         return metadata
+
+    def _validate_tasks(self, tasks: Optional[Sequence[Task]]) -> Tuple[Task, ...]:
+        # "no duplicates" (Package 030's own explicit Plan
+        # requirement) - enforced here, on the Plan side, mirroring
+        # PlanningSessionBuilder.with_task()'s own identical check on
+        # the PlanningSession side (argus.planning.builder). Plan
+        # itself performs no validation of its own - see plan.py's
+        # own module docstring.
+        if tasks is None:
+            return ()
+        if not isinstance(tasks, (list, tuple)):
+            raise InvalidPlanError(
+                f"tasks must be a list or tuple of Task instances, got {tasks!r}."
+            )
+        seen_ids = set()
+        validated: List[Task] = []
+        for task in tasks:
+            if not isinstance(task, Task):
+                raise InvalidPlanError(
+                    f"tasks must contain only Task instances, got {task!r}."
+                )
+            if task.task_id in seen_ids:
+                raise InvalidPlanError(
+                    f"Duplicate task_id {task.task_id!r} in tasks."
+                )
+            seen_ids.add(task.task_id)
+            validated.append(task)
+        return tuple(validated)
 
     def _require_plan(self, plan_id: str) -> Plan:
         if not isinstance(plan_id, str):

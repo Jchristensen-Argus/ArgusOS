@@ -4,15 +4,30 @@ The PlanningSession value object for ArgusOS.
 Purpose:
     Represent a single, immutable snapshot of one planning cycle - the
     CognitiveContext it operates over, the goals and constraints that
-    cycle carries, and descriptive metadata - per
-    factory/packages/023_PLANNING_SESSION.md. "A Planning Session
-    represents a single planning cycle... It performs no planning. It
-    executes no workflows. It is a transport object only." A
-    PlanningSession is pure data: it performs no planning, invokes no
-    Planner, validates no goal, optimizes nothing, executes no
-    workflow, and calls no other service - it only carries a
-    CognitiveContext plus this cycle's own goals, constraints, and
-    metadata forward.
+    cycle carries, the Tasks it has been given (Package 030), and
+    descriptive metadata - per factory/packages/023_PLANNING_SESSION.md,
+    as amended by factory/packages/030_PLAN_TASK_INTEGRATION.md. "A
+    Planning Session represents a single planning cycle... It
+    performs no planning. It executes no workflows. It is a transport
+    object only." A PlanningSession is pure data: it performs no
+    planning, invokes no Planner, validates no goal, optimizes
+    nothing, executes no workflow, and calls no other service - it
+    only carries a CognitiveContext plus this cycle's own goals,
+    constraints, tasks, and metadata forward.
+
+Package 030 Amendment - tasks Joins goals/constraints:
+    Per this package's own "New architecture" diagram - "Plan ->
+    Goals / Constraints / Metadata / Tasks" - PlanningSession gained a
+    fourth ordered collection field, `tasks: Sequence[Task]`, holding
+    the immutable `Task` objects (Package 029) this planning cycle has
+    been given, defaulting to an empty tuple, duplicate-free by
+    `task_id`. Like `goals`/`constraints`, `tasks` holds the actual
+    `Task` objects directly, not reference strings - the same "objects,
+    not references" choice this module's own docstring already
+    explains for `goals`/`constraints`. PlanningSession never
+    generates, decomposes, or validates the Tasks it is given - see
+    builder.py's own module docstring for where `with_task()`/
+    `with_tasks()`'s duplicate-`task_id` validation actually lives.
 
 Objects, Not References - A Deliberate Contrast With Package 022:
     Every field here holds an actual object, never a bare identifier
@@ -55,8 +70,8 @@ No Validation Here - See builder.py:
 
 Responsibilities:
     - PlanningSession: hold a CognitiveContext, this planning cycle's
-      goals and constraints, and descriptive metadata as a single
-      immutable value object.
+      goals, constraints, and tasks, and descriptive metadata as a
+      single immutable value object.
 
 Non-Responsibilities:
     - PlanningSession performs no planning, goal validation, plan
@@ -68,17 +83,19 @@ Non-Responsibilities:
       Limitations.
     - This module depends only on argus.context.context
       (CognitiveContext), argus.planning.goal (PlanningGoal),
-      argus.planning.constraint (PlanningConstraint), and
-      argus.planning.metadata (PlanningMetadata) to type its own
-      fields - it has no dependency on argus.planning.builder,
-      matching the "pure, dependency-free leaf" precedent set by
-      every other value object in this codebase.
+      argus.planning.constraint (PlanningConstraint),
+      argus.planning.metadata (PlanningMetadata), and argus.task.task
+      (Task, Package 030) to type its own fields - it has no
+      dependency on argus.planning.builder, matching the "pure,
+      dependency-free leaf" precedent set by every other value object
+      in this codebase.
 
 Dependencies:
     argus.context.context (CognitiveContext),
     argus.planning.goal (PlanningGoal),
     argus.planning.constraint (PlanningConstraint),
-    argus.planning.metadata (PlanningMetadata).
+    argus.planning.metadata (PlanningMetadata),
+    argus.task.task (Task).
 """
 
 import uuid
@@ -89,6 +106,7 @@ from argus.context.context import CognitiveContext
 from argus.planning.constraint import PlanningConstraint
 from argus.planning.goal import PlanningGoal
 from argus.planning.metadata import PlanningMetadata
+from argus.task.task import Task
 
 
 @dataclass(frozen=True)
@@ -109,6 +127,10 @@ class PlanningSession:
             Defaults to an empty tuple.
         constraints: The PlanningConstraint objects this planning
             cycle carries. Defaults to an empty tuple.
+        tasks: The Task objects (Package 029) this planning cycle has
+            been given. Defaults to an empty tuple. Duplicate-free by
+            `task_id` - see builder.py's own module docstring for
+            where that validation is enforced.
         metadata: Descriptive bookkeeping about this PlanningSession
             itself (creation timestamp, schema version, correlation
             id, and arbitrary extra data). Defaults to a fresh
@@ -119,8 +141,10 @@ class PlanningSession:
     cognitive_context: Optional[CognitiveContext] = None
     goals: Sequence[PlanningGoal] = field(default_factory=tuple)
     constraints: Sequence[PlanningConstraint] = field(default_factory=tuple)
+    tasks: Sequence[Task] = field(default_factory=tuple)
     metadata: PlanningMetadata = field(default_factory=PlanningMetadata)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "goals", tuple(self.goals))
         object.__setattr__(self, "constraints", tuple(self.constraints))
+        object.__setattr__(self, "tasks", tuple(self.tasks))

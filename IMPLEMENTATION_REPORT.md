@@ -1,94 +1,95 @@
-# ArgusOS Implementation Report — Package 029: Task Model
+# ArgusOS Implementation Report — Package 030: Plan Task Integration
 
 ## 1. Package Overview
 
-Package 029 implements the first-generation Task Model. "A Task represents a single unit of work produced by a Plan." This package introduces no execution — "Only the model." Unlike every runtime-facing package since 025 (Cognitive Pipeline, Agent Session, Response Engine, Execution Trace), this package is deliberately, completely isolated — it modifies no pre-existing file at all, the first purely additive package since Cognitive Context (022). A new package, `argus/task/` (`__init__.py`, `task.py`, `status.py`, `metadata.py`, `builder.py`, `interfaces.py`, `exceptions.py`), introduces `Task` (immutable — `task_id`, `name`, `description`, `status`, `metadata`, every field defaulted), `TaskStatus` (a plain `Enum`, five members — `PENDING`, `READY`, `COMPLETED`, `FAILED`, `CANCELLED` — mirroring `PlanStatus`'s own shape, no transitions implemented), `TaskMetadata` (immutable, mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata` exactly — `created_at`, `version`, `correlation_id`, `extra`), and `TaskBuilder`, the one mutable object in this package, whose `with_name()`/`with_description()`/`with_status()`/`with_metadata()`/`build()` mirror `ContextBuilder`/`PlanningSessionBuilder`/`TraceBuilder`'s (022/023/028) own fluent-builder shape. `argus/bootstrap.py` is completely unchanged — confirmed via `git diff --stat` showing zero lines changed, the second package since 023 for which that's true (after Execution Trace, 028). 1,668 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (1,756 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
+Package 030 extends the Planning domain so that a Plan owns an ordered collection of immutable Task objects. "This package does not execute tasks. It only allows the Planner to describe work at a finer level of detail." Unlike Package 029 (Task Model), which was deliberately isolated and modified no pre-existing file, this package is the first to connect `Task` to anything else in this codebase — "The Planner owns Tasks, but does not perform them." `Plan` (`argus/planner/plan.py`) and `PlanningSession` (`argus/planning/session.py`) both gained a new `tasks: Sequence[Task]` field, defaulting to an empty tuple and preserving insertion order; `PlanningSessionBuilder` (`argus/planning/builder.py`) gained `with_task()`, `with_tasks()`, and `clear_tasks()`; `Planner.create_plan()` (`argus/planner/planner.py`) gained an optional `tasks` keyword parameter validated by a new `_validate_tasks()` helper (rejecting non-list/tuple input, non-`Task` items, and duplicate `task_id`s), and `Planner.plan_session()` now carries `PlanningSession.tasks` through to the returned `Plan.tasks` unchanged. The central engineering decision — resolving a genuine conflict between the work order's own "Plan" section (literally naming the class `Plan`) and its own Architectural Position diagram (whose field list exactly matches `PlanningSession`, not `Plan`) — was to implement `tasks` on both objects, bridged by `plan_session()`, rather than picking one reading and leaving the other's own literal instruction unaddressed. `argus/bootstrap.py` is completely unchanged — confirmed via `git diff --stat` showing zero lines changed; `CORE_SERVICES_VERSION` remains `"0.2.9"`. 1,709 tests total pass under `python -m unittest discover -s tests`, and `python -m pytest` also passes (1,797 passed, 38 subtests passed). `python main.py` starts and shuts down cleanly.
 
 ## 2. Repository Verification Note
 
-Before writing any code, the uploaded repository ("ArgusOS (28).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, verify HEAD/tag ancestry, run smoke validation").
+Before writing any code, the uploaded repository ("ArgusOS (29).zip") was verified fresh against this package's own general pre-flight instruction ("verify repository state, verify version consistency, verify HEAD/tag ancestry, run smoke validation").
 
-No anomaly was found — the fifteenth consecutive clean pre-flight (015-029). HEAD (`19c8148`, "Synchronize repository version with v0.2.8 release") is a clean, single-commit descendant of tag `v0.2.8` (which points to `783d24e`, "Implement Package 028 Execution Trace"), confirmed via `git merge-base --is-ancestor v0.2.8 HEAD`. `git diff v0.2.8..HEAD --stat` shows exactly the expected one-line version-sync commit (`argus/bootstrap.py`, 1 insertion, 1 deletion) — no anomaly. Every substantive check passed cleanly: `argus/task/` confirmed absent from the repository prior to this package; `python -m pytest` passing (1692 passed, 38 subtests); `python -m unittest discover -s tests` passing (1604); `python -m unittest discover -s argus/tests` passing (64); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.2.8"` matching tag `v0.2.8`.
+No anomaly was found — the sixteenth consecutive clean pre-flight (015-030). HEAD (`14bb4fc`, "Synchronize repository version with v0.2.9 release") is a clean, single-commit descendant of tag `v0.2.9` (which points to `88f3e41`, "Implement Package 029 Task Model"), confirmed via `git merge-base --is-ancestor v0.2.9 HEAD`. `git diff v0.2.9..HEAD --stat` shows exactly the expected one-line version-sync commit (`argus/bootstrap.py`, 1 insertion, 1 deletion) — no anomaly. Every substantive check passed cleanly: `python -m pytest` passing (1756 passed, 38 subtests); `python -m unittest discover -s tests` passing (1668); `python -m unittest discover -s argus/tests` passing (64); `python main.py` starting and shutting down cleanly (exit 0); `CORE_SERVICES_VERSION == "0.2.9"` matching tag `v0.2.9`.
 
 Per the Founder's explicit release rules, this implementation was built, tested, and verified entirely within the supplied repository. No `git commit`, `git tag`, push, or git-history modification of any kind was performed, `CORE_SERVICES_VERSION` was not changed by this package, and this package is not being reported as complete — final validation, integration, release, tagging, and git operations are the Founder's responsibility, to be performed against the live repository after independent regression testing.
 
 ## 3. Architectural Rationale
 
-No `design/specifications/TASK_MODEL.md` exists — the same situation as Packages 002, 009-028. Every structural decision traces to the Founder's explicit work order. The full rationale for each decision below is also recorded in `factory/packages/029_TASK_MODEL.md`, in the source code's own module docstrings, and is only summarized here.
+No `design/specifications/PLAN_TASK_INTEGRATION.md` exists — the same situation as every package since 002 that lacked its own upstream specification file. Every structural decision traces to the Founder's explicit work order. The full rationale for each decision below is also recorded in `factory/packages/030_PLAN_TASK_INTEGRATION.md`, in the source code's own module docstrings, and is only summarized here.
 
-**Decision 1 — Every `Task` field defaults; none is required.** `PlanStep` (this codebase's closest existing analogue) makes `description`/`required_capability` required, since it has no builder and is constructed directly by `Planner.add_step()`. `Task` has its own dedicated `TaskBuilder`, matching `CognitiveContext`/`PlanningSession`/`ExecutionTrace`'s (022/023/028) own "value object with a dedicated builder" shape instead, where every field defaults and the builder's own `with_*()` methods do the validating.
+**Decision 1 — `tasks` is implemented on both `Plan` and `PlanningSession`, not just one.** The work order's own "Plan" section literally names the class `Plan` ("Extend the existing immutable: Plan. Add: tasks"), but its own Architectural Position diagram's field list ("Goals / Constraints / Metadata / Tasks") exactly matches `PlanningSession`'s actual fields, not `Plan`'s — `Plan` has never had `goals`/`constraints`. The "Planning Builder" section's own "the existing PlanningBuilder" can only mean `PlanningSessionBuilder`, the only class with "Builder" in its own name in either package. Implementing both, bridged by `Planner.plan_session()` carrying `PlanningSession.tasks` through to `Plan.tasks` (mirroring the identical Package 024 precedent for `constraints`), is the only reading under which every sentence in the work order is literally true simultaneously. See Section 9 and `factory/packages/030_PLAN_TASK_INTEGRATION.md`'s own "Engineering Decision" section for the full reasoning.
 
-**Decision 2 — `TaskBuilder` gains `with_name()`/`with_description()` beyond the work order's own four-item Responsibilities list.** That list names only "create task, assign metadata, assign status, build immutable Task" — read "create task" as the umbrella responsibility encompassing a `Task`'s basic identity, since a builder unable to ever set `name`/`description` away from their own empty-string defaults could not produce a genuinely populated `Task` at all. See Section 9 for the full reasoning.
+**Decision 2 — duplicate `task_id` rejection is identity-based, enforced in the builder/service, never in the frozen value objects.** Consistent with this codebase's established id-based duplicate-prevention pattern (`CapabilityRegistry`, `PluginManager`) and its established "validation lives in the builder/service, not the value object" division of responsibility — `Plan.steps` has never rejected duplicates at the dataclass level either. Enforced in two places, mirroring Decision 1's dual-object resolution: `PlanningSessionBuilder.with_task()` and a new `Planner._validate_tasks()` helper used by `create_plan()`.
 
-**Decision 3 — `TaskMetadata`'s field order mirrors its three siblings, not the work order's own listed order.** The work order lists "created_at, correlation_id, version, extra" — a different relative order than `ContextMetadata`/`PlanningMetadata`/`TraceMetadata` all use. Continuing Package 028's own identical resolution to this identical tension: "mirror existing metadata conventions" is the dominant instruction, and since every field defaults, no ordering constraint forces one sequence over the other.
+**Decision 3 — "Only the Planning package changes" is read as "the planning domain" (both `argus/planning/` and `argus/planner/`), not the single literal directory.** The work order's own Planner section explicitly names "Planner," a class living in `argus/planner/`, as needing an update — only consistent with the broader reading. The explicitly-excluded packages (Agent, Pipeline, Response, Execution Trace, Runtime, Scheduler) remain completely untouched regardless.
 
-**Decision 4 — `TaskStatus` is a plain `Enum`, not a `str` subclass, with lowercase string values matching each member's name.** Mirrors `PlanStatus`'s own exact shape rather than inventing a new enumeration style.
+**Decision 4 — `Planner.create_plan()` gained an optional `tasks` parameter beyond what the work order's own Testing section explicitly names.** The Testing section focuses on `plan_session()`'s carry-through; `create_plan()`'s own direct API needed some way to set `Plan.tasks` too, mirroring how `metadata` is already an optional keyword parameter there.
 
 ## 4. IService Adoption
 
-None. `ITaskBuilder` does not inherit `IService` — the same "not an IService" shape Cognitive Context (022), Planning Session (023), and Execution Trace (028) already established for infrastructure packages that expand no service registry. No new entry was added to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md` — matching the precedent already set by those same three packages, none of which added one either.
+None. This package introduces no new class of any kind — it extends four already-shipped classes (`Plan`, `PlanningSession`, `PlanningSessionBuilder`, `Planner`), none of which is or has ever been an `IService` implementation. No new entry was added to `design/decisions/0002_ISERVICE_ADOPTION_CRITERION.md`.
 
 ## 5. Directory Tree (files touched)
 
 ```
 argus/
-    task/
-        __init__.py                          (new)
-        task.py                              (new)
-        status.py                            (new)
-        metadata.py                          (new)
-        builder.py                           (new)
-        interfaces.py                        (new)
-        exceptions.py                        (new)
+    planner/
+        plan.py                              (modified)
+        planner.py                           (modified)
+        interfaces.py                        (modified)
+    planning/
+        session.py                           (modified)
+        builder.py                           (modified)
+        interfaces.py                        (modified)
 factory/
     packages/
-        029_TASK_MODEL.md                    (new)
+        030_PLAN_TASK_INTEGRATION.md          (new)
     ROADMAP.md                               (modified)
 tests/
-    test_task.py                             (new)
-    test_task_status.py                      (new)
-    test_task_metadata.py                    (new)
-    test_task_builder.py                     (new)
+    test_plan.py                             (modified)
+    test_planner.py                          (modified)
+    test_planner_session_integration.py      (modified)
+    test_planning_session.py                 (modified)
+    test_planning_builder.py                 (modified)
 CHANGELOG.md                                 (modified)
 DEVLOG.md                                    (modified)
 IMPLEMENTATION_REPORT.md                     (replaced — this file)
 ```
 
-No file outside this list was created, deleted, moved, or modified. Per this package's own explicit Integration section — "Do not modify: Planner, Plan, Pipeline, Response, Agent, Execution Trace" — `argus/bootstrap.py`, `argus/planner/`, `argus/planning/`, `argus/context/`, `argus/conversation/`, `argus/memory/`, `argus/memory_integration/`, `argus/knowledge/`, `argus/knowledge_graph/`, `argus/decision/`, `argus/reasoning/`, `argus/pipeline/`, `argus/agent/`, `argus/response/`, `argus/trace/`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, and `argus/events/event_types.py` were left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them. `memory/memory_store.json` shows no diff.
+No file outside this list was created, deleted, moved, or modified. Per this package's own explicit Integration Rules — "Do not modify: Agent, Pipeline, Response, Execution Trace, Runtime, Scheduler. Only the Planning package changes." — `argus/bootstrap.py`, `argus/task/`, `argus/agent/`, `argus/pipeline/`, `argus/response/`, `argus/trace/`, `argus/runtime/`, `argus/reasoning/`, `argus/decision/`, `argus/memory/`, `argus/memory_integration/`, `argus/knowledge/`, `argus/knowledge_graph/`, `argus/context/`, `argus/conversation/`, `tests/test_bootstrap.py`, `argus/tests/test_bootstrap.py`, and `argus/events/event_types.py` were left completely untouched — confirmed via `git diff --stat` showing zero lines changed in any of them.
 
 ## 6. Integration Notes
 
-- `argus/bootstrap.py` was not modified at all — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed. `CORE_SERVICES_VERSION` remains `"0.2.8"`.
-- No pre-existing test file was modified — `tests/test_bootstrap.py` and `argus/tests/test_bootstrap.py` are both untouched, since no new core service was registered.
-- `argus/events/event_types.py` was not modified — no new `EventType` members.
-- Source-inspection confirms `argus/task/*.py` imports nothing outside the Python standard library and its own sibling modules — no `IEventBus`, no `IPlanner`, no `ICognitivePipeline`, no `IAgentService`, no `IResponseEngine`, no `ITraceBuilder`, nothing else.
-- Source-inspection confirms no file outside `argus/task/` imports anything from `argus.task` — this package has zero inbound dependencies as well as zero outbound ones.
+- `argus/bootstrap.py` was not modified at all — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed. `CORE_SERVICES_VERSION` remains `"0.2.9"`.
+- No `tests/test_bootstrap.py`/`argus/tests/test_bootstrap.py` change — no new core service was registered.
+- `argus/events/event_types.py` was not modified — no new `EventType` members; `Planner.create_plan()`/`plan_session()` continue publishing the same `PLAN_CREATED`/`PLAN_UPDATED` events with unchanged payloads.
+- `argus/task/` was not modified at all — only new inbound dependencies were added *onto* `Task` from four Planning/Planner modules (`argus/planner/plan.py`, `argus/planner/planner.py`, `argus/planning/session.py`, `argus/planning/builder.py`, plus the two `interfaces.py` files), all typing-only or direct-construction-validation usages.
+- `IPlanner.create_plan()` and `IPlanningSessionBuilder`'s three new abstract methods were both updated in lockstep with their concrete implementations, keeping interface and implementation in sync per this codebase's established convention.
 
 ## 7. Test Results
 
-New task suites:
+Modified Planning/Planner suites, standalone:
 ```
-python -m pytest tests/test_task.py tests/test_task_status.py tests/test_task_metadata.py tests/test_task_builder.py -q
-64 passed in 0.06s
+python -m pytest tests/test_plan.py tests/test_planner.py tests/test_planner_session_integration.py tests/test_planning_session.py tests/test_planning_builder.py -q
+183 passed in 0.09s
 ```
 
 Canonical suite (`tests/`):
 ```
 python -m unittest discover -s tests
-Ran 1668 tests in 0.108s
+Ran 1709 tests in 0.137s
 OK
 ```
 
 Per this package's explicit testing instruction:
 ```
 python -m pytest
-1756 passed, 38 subtests passed in 1.12s
+1797 passed, 38 subtests passed in 1.15s
 ```
 
 The duplicate `argus/tests/` also verified passing standalone (unaffected — not touched by this package):
 ```
-python -m unittest discover -s argus/tests -p "test_*.py"
-Ran 64 tests in 0.014s
+python -m unittest discover -s argus/tests
+Ran 64 tests in 0.015s
 OK
 ```
 
@@ -105,76 +106,85 @@ Measured with `coverage.py`, `python -m coverage run -m pytest`:
 
 | Module | Stmts | Miss | Cover |
 |---|---|---|---|
-| `argus/task/__init__.py` | 7 | 0 | 100% |
-| `argus/task/builder.py` | 35 | 0 | 100% |
-| `argus/task/exceptions.py` | 2 | 0 | 100% |
-| `argus/task/interfaces.py` | 15 | 0 | 100% |
-| `argus/task/metadata.py` | 14 | 0 | 100% |
-| `argus/task/status.py` | 7 | 0 | 100% |
-| `argus/task/task.py` | 11 | 0 | 100% |
+| `argus/planner/__init__.py` | 6 | 0 | 100% |
+| `argus/planner/exceptions.py` | 5 | 0 | 100% |
+| `argus/planner/interfaces.py` | 23 | 0 | 100% |
+| `argus/planner/plan.py` | 28 | 0 | 100% |
+| `argus/planner/planner.py` | 118 | 0 | 100% |
+| `argus/planner/step.py` | 14 | 0 | 100% |
+| `argus/planning/__init__.py` | 8 | 0 | 100% |
+| `argus/planning/builder.py` | 57 | 0 | 100% |
+| `argus/planning/constraint.py` | 12 | 0 | 100% |
+| `argus/planning/exceptions.py` | 2 | 0 | 100% |
+| `argus/planning/goal.py` | 8 | 0 | 100% |
+| `argus/planning/interfaces.py` | 24 | 0 | 100% |
+| `argus/planning/metadata.py` | 14 | 0 | 100% |
+| `argus/planning/session.py` | 20 | 0 | 100% |
 
-100% coverage across the entire `argus/task/` package (91 statements, new) — reached on the first measurement, no post-hoc gap-closing needed.
+100% coverage across every modified Planning/Planner file (339 statements total) — reached on the first measurement, no post-hoc gap-closing needed.
 
 ## 9. Engineering Decisions / Deviations from the Work Order
 
-- **`TaskBuilder` gained `with_name()`/`with_description()`, not individually named in the work order's own Responsibilities list.** The list names exactly four items — "create task, assign metadata, assign status, build immutable Task" — omitting "assign name"/"assign description" as their own bullets. A literal reading would leave the builder unable to ever set `Task.name`/`Task.description` away from their own empty-string defaults, undermining its own purpose. Resolved by reading "create task" as the umbrella responsibility encompassing a Task's basic identity, adding both methods to match every other fluent builder in this codebase's own "one `with_*()` per field" shape. See Section 3, Decision 2, and `factory/packages/029_TASK_MODEL.md`'s own "Engineering Decision" section for the full reasoning.
-- **`TaskMetadata`'s field order mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata`, not the work order's own listed order.** See Section 3, Decision 3 — the identical resolution Package 028 already applied to `TraceMetadata`'s own equivalent tension.
-- **Every `Task` field defaults; none is required.** A judgment call recognizing `Task`'s own dedicated builder places it in the same family as `CognitiveContext`/`PlanningSession`/`ExecutionTrace`, not `PlanStep`. See Section 3, Decision 1.
-- **`CORE_SERVICES_VERSION` remains `"0.2.8"`, unchanged by this package.**
-- **`argus/bootstrap.py` required zero changes** — a direct, verified consequence of "No new services. No bootstrap changes," not an oversight.
-- **No coverage gap required a post-hoc fix** — 100% was reached on the first `coverage run` for `argus/task/`.
-- **A genuine, previously-undocumented codebase-wide limitation was discovered while writing "serialization consistency" tests** — `types.MappingProxyType` (what every metadata class's own `extra` field is wrapped in, since Package 022) is not picklable or deep-copyable via the Python standard library. Not a defect in this package; `ContextMetadata`, `PlanningMetadata`, `ResponseMetadata`, and `TraceMetadata` all share the identical limitation, simply never previously exercised by a test. Resolved by testing `Task`'s own scalar fields and `TaskStatus`/`TaskMetadata.extra` independently rather than pickling/deep-copying a whole `Task`, and documented explicitly in both the test file and this package's Known Limitations.
+- **`tasks` implemented on both `Plan` and `PlanningSession`, bridged by `Planner.plan_session()`.** The work order's own "Plan" section and its own Architectural Position diagram describe two different objects when read literally against each other — see Section 3, Decision 1, and `factory/packages/030_PLAN_TASK_INTEGRATION.md`'s own dedicated "Engineering Decision" section for the full reasoning, including the two rejected alternative readings.
+- **Duplicate `task_id` rejection is identity-based, enforced twice (once per object), never in the frozen value objects themselves.** See Section 3, Decision 2.
+- **"Only the Planning package changes" read broadly as "the planning domain."** See Section 3, Decision 3 — distinguished from a loosening of scope, since the explicitly-excluded packages remain completely untouched.
+- **`Planner.create_plan()` gained an optional `tasks` parameter beyond the work order's own explicit Testing-section focus on `plan_session()`.** See Section 3, Decision 4.
+- **`CORE_SERVICES_VERSION` remains `"0.2.9"`, unchanged by this package.**
+- **`argus/bootstrap.py` required zero changes** — a direct, verified consequence of this package introducing no new class of any kind, not an oversight.
+- **No coverage gap required a post-hoc fix** — 100% was reached on the first `coverage run` across every modified Planning/Planner file.
+- **One edit script required a diagnostic-and-retry pass** — the first attempt to edit `argus/planner/plan.py`'s own module docstring failed its fifth of six sequential assertions because the actual "Responsibilities:" text didn't match this session's own assumed wording; none of the six edits landed on that attempt (confirmed via `git diff --stat` showing no change), diagnosed with a standalone substring-check script, and fixed by correcting the one mismatched block before re-running the rest successfully. Every other file in this package applied cleanly on the first attempt.
 
 ## 10. Known Limitations
 
-- **`Task` is never produced by anything** — no `Plan`, `PlanStep`, `Planner`, or any other component in this codebase constructs a `Task`; it is available only to a caller holding a `TaskBuilder` directly.
-- **`TaskStatus` values beyond `PENDING`** (`READY`, `COMPLETED`, `FAILED`, `CANCELLED`) **are reserved for future packages** — no Version 1 code ever produces or transitions between them.
-- **`TaskBuilder.build()` performs no "was `with_name()` ever called" check** — an unnamed `Task` (`name=""`) is valid, not an error.
-- **`TaskMetadata.extra`'s `MappingProxyType` wrapping is not picklable/deep-copyable** — see Section 9's own note; a codebase-wide limitation, newly documented here.
-- **No execution, no scheduling, no workflows, no tools, no persistence, no concurrency** — unchanged from every prior package in this phase.
+- **A `Plan`/`PlanningSession` constructed directly (not via `Planner`/`PlanningSessionBuilder`) performs no duplicate-`task_id` rejection of its own** — `Plan(originating_intent=..., tasks=[t1, t1_duplicate])` succeeds silently at the dataclass level, exactly like `Plan`'s own pre-existing, identical behavior toward duplicate `steps`.
+- **Tasks are never generated, decomposed, or scheduled by anything in this package** — by design. A `Plan`'s `tasks` collection is populated exclusively by whatever the caller explicitly supplies; no goal, constraint, or intent is ever translated into a `Task` automatically.
+- **No task graph, dependency ordering, or workflow relationship between Tasks exists** — `Plan.tasks`/`PlanningSession.tasks` are flat, ordered sequences with no notion of one Task depending on another.
+- **`clear_tasks()` has no counterpart on `goals`/`constraints`** — an intentional asymmetry, since this package's own work order names `clear_tasks()` explicitly and neither prior package's own work order asked for the equivalent on any other collection field.
+- **Nothing yet reads `Plan.tasks` back out for any purpose** — no `AgentService`, `ResponseEngine`, or `ExecutionTrace` step references `Task` in any way; this package stops at storage and pass-through, per its own explicit "does not execute tasks" constraint.
+- No execution, no scheduling, no workflows, no tools, no persistence, no concurrency — unchanged from every prior package in this phase.
 - The repository's stray `argus/` duplicate tree and legacy pre-Factory files remain unresolved, out of scope per the Founder's explicit repository rules.
 
 ## 11. Repository-Derived Package Metrics (measured, not estimated)
 
-Measured via `git diff --stat` against the working tree's unmodified base commit `19c8148` (no commit was made — see Section 2):
+Measured via `git diff --stat` against the working tree's unmodified base commit `14bb4fc` (no commit was made — see Section 2):
 
-- Files Created: 12 (`argus/task/__init__.py`, `argus/task/task.py`, `argus/task/status.py`, `argus/task/metadata.py`, `argus/task/builder.py`, `argus/task/interfaces.py`, `argus/task/exceptions.py`, `factory/packages/029_TASK_MODEL.md`, `tests/test_task.py`, `tests/test_task_status.py`, `tests/test_task_metadata.py`, `tests/test_task_builder.py`)
-- Files Modified: 4 (`factory/ROADMAP.md`, `CHANGELOG.md`, `DEVLOG.md`, `IMPLEMENTATION_REPORT.md` — this file, replaced)
-- Lines Added: 1,517 / Lines Removed: 124 (measured via `git diff --stat` across all 16 touched files, including this report's own replacement; every touched file outside this report's own self-replacement is purely additive — the 124 removed lines are entirely this file's own prior Package 028 content being overwritten with Package 029's own)
-- Unit Tests: 1,668 passing in canonical `tests/` (net +64 vs. Package 028's 1,604: +18 `test_task.py`, +8 `test_task_status.py`, +10 `test_task_metadata.py`, +28 `test_task_builder.py` — entirely additive, no pre-existing test file modified)
-- Coverage: 100% (entire `argus/task/` package, new)
-- Public Classes: 4 new (`Task`, `TaskStatus`, `TaskMetadata`, `TaskBuilder`)
-- Public Interfaces: 1 new (`ITaskBuilder`)
-- New Exceptions: 2 (`TaskError`, `InvalidTaskError`)
-- New Dependencies: 0 external (standard library only); `argus/task/` depends on nothing but its own sibling modules, and nothing outside `argus/task/` depends on it
+- Files Created: 1 (`factory/packages/030_PLAN_TASK_INTEGRATION.md`)
+- Files Modified: 14 (`argus/planner/plan.py`, `argus/planner/planner.py`, `argus/planner/interfaces.py`, `argus/planning/session.py`, `argus/planning/builder.py`, `argus/planning/interfaces.py`, `tests/test_plan.py`, `tests/test_planner.py`, `tests/test_planner_session_integration.py`, `tests/test_planning_session.py`, `tests/test_planning_builder.py`, `factory/ROADMAP.md`, `CHANGELOG.md`, `DEVLOG.md`) plus `IMPLEMENTATION_REPORT.md` itself (replaced) — 15 total
+- Lines Added: 1,295 / Lines Removed: 156 (measured via `git diff --stat` across all 16 touched files, including this report's own replacement; every touched file outside this report's own self-replacement is purely additive — the 156 removed lines are entirely this file's own prior Package 029 content being overwritten with Package 030's own, plus incidental docstring-block replacements in `argus/planner/plan.py`/`planner.py`/`interfaces.py` and `argus/planning/session.py`/`builder.py`/`interfaces.py` where existing module docstrings were amended in place rather than purely appended to)
+- Unit Tests: 1,709 passing in canonical `tests/` (net +41 vs. Package 029's 1,668: +5 `test_plan.py`, +4 `test_planning_session.py`, +14 `test_planning_builder.py`, +11 `test_planner.py`, +9 `test_planner_session_integration.py` — entirely additive, no test removed or replaced)
+- Coverage: 100% (all 14 statements-bearing modules across `argus/planner/` and `argus/planning/`, 339 statements total)
+- Public Classes: 0 new (four already-shipped classes extended: `Plan`, `PlanningSession`, `PlanningSessionBuilder`, `Planner`)
+- Public Interfaces: 0 new (two already-shipped interfaces extended: `IPlanner`, `IPlanningSessionBuilder`)
+- New Exceptions: 0 (existing `InvalidPlanError`/`InvalidPlanningSessionError` reused for all new validation paths)
+- New Dependencies: 0 external; `argus/planner/` and `argus/planning/` each gained one new internal dependency (`argus.task.task.Task`) — `argus/task/` itself gained no new outbound dependency and remains dependent on nothing but the standard library
 - External Libraries: 0 (standard library only)
-- Architecture Deviations: 0 breaking changes (purely additive); 2 documented interpretive judgment calls (see Section 9)
+- Architecture Deviations: 0 breaking changes (every new field defaults to an empty tuple, preserving every pre-030 call site's own behavior unchanged); 4 documented interpretive judgment calls (see Section 9)
 
 ## 12. Pre-Completion Checklist (per the Founder's explicit checklist)
 
-- ✓ **`argus/task/` implemented with all seven files** — confirmed via directory listing and `git diff --stat`.
-- ✓ **No new services; no bootstrap changes** — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed.
-- ✓ **`TaskBuilder` is the only mutable object; `ITaskBuilder` is not a service** — confirmed via `Task`/`TaskStatus`/`TaskMetadata` all being frozen dataclasses/enums, and `ITaskBuilder` not inheriting `IService`.
-- ✓ **Do not modify: Planner, Plan, Pipeline, Response, Agent, Execution Trace** — confirmed via `git diff --stat` on all six, zero lines changed.
-- ✓ **No new events** — confirmed via `git diff --stat -- argus/events/event_types.py` showing zero lines changed.
-- ✓ **No execution, no scheduling, no workflows, no tools, no persistence** — confirmed by direct inspection: `argus/task/` contains no method that calls, schedules, dispatches, or persists anything.
-- ✓ **Immutability, builder behavior, metadata propagation, enumeration correctness, invalid construction, serialization consistency** — confirmed via the corresponding dedicated test classes across `tests/test_task.py`, `test_task_status.py`, `test_task_metadata.py`, and `test_task_builder.py`.
-- ✓ **100% coverage across `argus/task/`** — confirmed via `coverage.py` (91/91 statements).
-- ✓ **No regressions** — `python -m unittest discover -s tests` reports `Ran 1668 tests ... OK`; `python -m pytest` reports `1756 passed, 38 subtests passed`; every one of Package 028's own 1,692 passing pytest tests still passes unchanged.
+- ✓ **`Plan.tasks` and `PlanningSession.tasks` both implemented — ordered, immutable, default empty, no duplicates (enforced in builder/service), preserving insertion order** — confirmed via dedicated test classes in `tests/test_plan.py` and `tests/test_planning_session.py`.
+- ✓ **`PlanningSessionBuilder.with_task()`/`with_tasks()`/`clear_tasks()` implemented, builder remains the only mutable object** — confirmed via `tests/test_planning_builder.py`'s own dedicated test coverage.
+- ✓ **`Planner` updated so Plans can contain Tasks; no task generation, no AI, no decomposition** — confirmed via `tests/test_planner.py`'s "does not generate tasks automatically" test and `tests/test_planner_session_integration.py`'s "Planner never generates its own tasks" test.
+- ✓ **Do not modify: Agent, Pipeline, Response, Execution Trace, Runtime, Scheduler** — confirmed via `git diff --stat` on all six, zero lines changed.
+- ✓ **No bootstrap changes; no new core services** — confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed.
+- ✓ **No new EventTypes** — confirmed via `git diff --stat -- argus/events/event_types.py` showing zero lines changed.
+- ✓ **Empty task list, single task, multiple tasks, duplicate rejection, insertion order, immutability, builder methods, planner propagation all tested** — confirmed via the corresponding dedicated test classes across all five modified test files.
+- ✓ **100% coverage across all modified Planning files** — confirmed via `coverage.py` (339/339 statements).
+- ✓ **No regressions** — `python -m unittest discover -s tests` reports `Ran 1709 tests ... OK`; `python -m pytest` reports `1797 passed, 38 subtests passed`; every one of Package 029's own 1,756 passing pytest tests still passes unchanged.
 - ✓ **`python main.py` starts cleanly** — exit code 0.
 - ✓ **No unintended repository modifications** — confirmed via `git status`/`git diff --stat`.
-- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.2.8"`.
-- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `19c8148`).
-- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.0.3`-`v0.2.8`, plus `charter-v1.0`).
+- ✓ **`CORE_SERVICES_VERSION` not modified** — confirmed still `"0.2.9"`.
+- ✓ **No commit created** — confirmed via `git log` (HEAD unchanged at `14bb4fc`).
+- ✓ **No tag created** — confirmed via `git tag -l` (unchanged: `v0.0.3`-`v0.2.9`, plus `charter-v1.0`).
 - ✓ **Repository ready for architectural review** — all regression, smoke, and coverage checks pass locally; final integration, version bump, commit, and tag remain the Founder's responsibility.
 
 ## 13. Concise Implementation Summary
 
-Package 029 adds `argus/task/`, the first-generation Task Model: `Task` (immutable, `task_id`/`name`/`description`/`status`/`metadata`, every field defaulted, mirroring `CognitiveContext`/`PlanningSession`/`ExecutionTrace`'s own "value object with a dedicated builder" shape rather than `PlanStep`'s required-field shape), `TaskStatus` (a plain `Enum`, five members, mirroring `PlanStatus` exactly, no transitions implemented), `TaskMetadata` (mirrors `ContextMetadata`/`PlanningMetadata`/`TraceMetadata` exactly), and `TaskBuilder` (the one mutable object, mirroring `ContextBuilder`/`PlanningSessionBuilder`/`TraceBuilder`'s fluent shape, extended with `with_name()`/`with_description()` beyond the work order's own four-item Responsibilities list so every field is actually settable). This is the first purely additive package since Cognitive Context (022) — zero pre-existing files modified beyond documentation, zero deletions anywhere in the diff, and `argus/bootstrap.py` completely untouched. A genuine codebase-wide finding surfaced while writing "serialization consistency" tests: `types.MappingProxyType` (used by every metadata class since Package 022) is not picklable/deep-copyable via the standard library — documented as a Known Limitation rather than worked around. 1,668 tests pass in `tests/` (`python -m pytest` also passes: 1,756 passed, 38 subtests), 100% coverage across `argus/task/`. Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
+Package 030 extends the Planning domain so that a `Plan` (and, per the central Engineering Decision, a `PlanningSession` too) owns an ordered, immutable collection of `Task` objects. `Plan.tasks`/`PlanningSession.tasks` both default to an empty tuple, preserve insertion order, and reject no duplicates at the dataclass level (validation lives in the builder/service, matching `Plan.steps`'s own pre-existing precedent). `PlanningSessionBuilder` gained `with_task()`/`with_tasks()`/`clear_tasks()`, the first "reset a collection" method any builder in this codebase has ever exposed. `Planner.create_plan()` gained an optional `tasks` parameter validated by a new `_validate_tasks()` helper (identity-based duplicate rejection, matching `CapabilityRegistry`/`PluginManager`'s established pattern), and `Planner.plan_session()` now carries `PlanningSession.tasks` through to `Plan.tasks` unchanged — "The Planner simply preserves whatever Tasks are supplied during construction." The defining challenge was a genuine internal conflict in the work order itself between its "Plan" section (literally naming the class `Plan`) and its own Architectural Position diagram (whose field list matches `PlanningSession`, not `Plan`) — resolved by implementing both, rather than picking one reading and leaving the other's own literal instruction unaddressed. `argus/bootstrap.py` and every explicitly-excluded package (Agent, Pipeline, Response, Execution Trace, Runtime, Scheduler) remain completely untouched. 1,709 tests pass in `tests/` (`python -m pytest` also passes: 1,797 passed, 38 subtests), 100% coverage across every modified Planning/Planner file (339 statements). Built and verified entirely within the Founder-supplied repository; no commit, tag, push, or git-history change was made, and `CORE_SERVICES_VERSION` was not advanced, per instruction.
 
 ## 14. Architectural Observations
 
-- This is the first package since Cognitive Context (022) to be purely additive to the codebase itself — every touched file outside this report's own self-replacement gained lines and lost none — and the second package since 023 (after Execution Trace, 028) to leave `argus/bootstrap.py` completely untouched. Two infrastructure-shaped packages in a row (028, 029) is a useful data point that this phase's own cadence is not purely "add another core service" — value-object packages that lay groundwork for a later integration package remain a recurring, legitimate category.
-- The `with_name()`/`with_description()` interpretive gap (Section 3, Decision 2) is a different flavor of ambiguity than Package 028's own "Integration diagram vs. Dependency Rule" conflict — not two instructions disagreeing with each other, but one instruction's own list being incomplete relative to what the object it describes actually needs. The resolution principle applied here — a builder must expose a `with_*()` for every field its built object holds, even when a Responsibilities list names only a subset — is offered as a reusable precedent for any future package whose own builder-shaped work order similarly under-specifies its method surface.
-- The `MappingProxyType` pickling discovery (Section 9) is this package's most durable contribution beyond its own immediate scope: it is a latent property of `ContextMetadata`/`PlanningMetadata`/`ResponseMetadata`/`TraceMetadata` alike, not something introduced by `TaskMetadata`. Any future package building a persistence or serialization layer over these metadata classes will need to account for it - now documented once, here, rather than being independently rediscovered.
-- The Task Model closes none of the "currently-unowned architectural gap" items flagged in Packages 011 through 028's own reports - by design, since this package is explicitly scoped to the model only. It does, however, name the gap more precisely: "Future architecture: Plan -> Tasks -> Execution" is now a concrete diagram in this codebase's own documentation, giving whatever future package integrates Tasks into Plans (and whatever package after that introduces actual execution) a named target to build toward.
+- This is the first package in this phase to extend two already-shipped objects simultaneously to resolve a single ambiguity, rather than choosing one interpretation outright (contrast Package 028's "Integration diagram vs. Dependency Rule" conflict, which was resolved by picking the Dependency Rule's own literal wording over the diagram's literal ordering). The dual-implementation approach taken here — implement both readings, then bridge them via the one delegation path (`plan_session()`) the work order's own third section already describes — is offered as a reusable precedent for any future package whose own work order similarly names one class in one section and describes a different class's fields in another.
+- The Task Model (Package 029) named a concrete future architecture — "Plan -> Tasks -> Execution" — without wiring any of it up. This package wires up exactly the first arrow, "Plan -> Tasks," and stops there deliberately: nothing yet reads `Plan.tasks` back out for any purpose. The next arrow, "Tasks -> Execution," remains a named but entirely unbuilt target for a future package, per `factory/packages/030_PLAN_TASK_INTEGRATION.md`'s own "Future Execution Model" section.
+- Every new field across this package defaults to an empty tuple, and every pre-030 call site — `Plan(originating_intent=...)`, `PlanningSession()`, `Planner.create_plan(intent)`, `Planner.plan_session(session)` — continues to produce the identical output it always has. This package's own regression suite is itself the clearest evidence of that: all 1,756 of Package 029's own passing pytest tests still pass completely unchanged, with zero modifications to any pre-existing assertion.
+- The identity-based duplicate-rejection policy applied here (`task_id` equality) is now the third time this codebase has reached for the same `CapabilityRegistry`/`PluginManager` precedent rather than inventing a new duplicate-detection rule, reinforcing it as this codebase's own settled convention for "no duplicates" wherever a work order uses that phrase without further specification.

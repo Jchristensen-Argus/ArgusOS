@@ -3,8 +3,13 @@ Public interface contract for the ArgusOS Planner.
 
 Purpose:
     Define IPlanner, the contract other modules depend on, per
-    factory/packages/015_PLANNER.md and
-    factory/packages/024_PLANNER_SESSION_INTEGRATION.md.
+    factory/packages/015_PLANNER.md,
+    factory/packages/024_PLANNER_SESSION_INTEGRATION.md, and
+    factory/packages/030_PLAN_TASK_INTEGRATION.md (create_plan()
+    gained an optional `tasks` parameter; plan_session()'s own
+    docstring updated to describe carrying a PlanningSession's tasks
+    through - see planner.py's own module docstring for the full
+    "Package 030 Amendment").
 
 Architectural Note - Why IPlanner Does NOT Inherit IService:
     Unlike Scheduler, IntentRouter, WorkflowEngine, ConversationManager,
@@ -75,7 +80,8 @@ Dependencies:
     argus.intent.intent (Intent),
     argus.planning.session (PlanningSession) - Package 024, the
     immutable contract only (see this module's own Architectural
-    Note).
+    Note), argus.task.task (Task) - Package 030, the immutable
+    contract only.
 """
 
 from abc import ABC, abstractmethod
@@ -84,6 +90,7 @@ from typing import Optional, Sequence
 from argus.intent.intent import Intent
 from argus.planner.plan import Plan
 from argus.planning.session import PlanningSession
+from argus.task.task import Task
 
 
 class IPlanner(ABC):
@@ -107,9 +114,12 @@ class IPlanner(ABC):
         becomes one PlanStep (see planner.py's own module
         docstring for the exact mapping);
         planning_session.constraints are recorded descriptively in
-        the returned Plan's own metadata, never as steps. Never
-        modifies planning_session, its cognitive_context, its goals,
-        or its constraints - every one of those is already an
+        the returned Plan's own metadata, never as steps;
+        planning_session.tasks is carried through unchanged onto the
+        returned Plan's own `tasks` field (Package 030) - no Task is
+        generated, decomposed, or otherwise derived. Never modifies
+        planning_session, its cognitive_context, its goals, its
+        constraints, or its tasks - every one of those is already an
         immutable value object, so this is true by construction, not
         by added policy. Raises InvalidPlanError if planning_session
         is not a PlanningSession instance. See this module's own
@@ -118,10 +128,22 @@ class IPlanner(ABC):
         argus.planning dependency is PlanningSession itself."""
 
     @abstractmethod
-    def create_plan(self, intent: Intent, *, metadata: Optional[dict] = None) -> Plan:
-        """Create and store a new, empty Plan (PlanStatus.CREATED,
-        no steps) for `intent`. Raises InvalidPlanError if intent is
-        not an Intent instance."""
+    def create_plan(
+        self,
+        intent: Intent,
+        *,
+        metadata: Optional[dict] = None,
+        tasks: Optional[Sequence[Task]] = None,
+    ) -> Plan:
+        """Create and store a new Plan (PlanStatus.CREATED, no steps)
+        for `intent`, optionally carrying `tasks` unchanged onto the
+        constructed Plan's own `tasks` field (Package 030) - no Task
+        is generated automatically; a Plan with `tasks=None` has an
+        empty `tasks` tuple, exactly like its pre-030 default. Raises
+        InvalidPlanError if intent is not an Intent instance, if
+        `tasks` is not a list or tuple, if any item in `tasks` is not
+        a Task instance, or if `tasks` contains two Task objects
+        sharing the same `task_id` ("no duplicates")."""
 
     @abstractmethod
     def add_step(

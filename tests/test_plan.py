@@ -6,6 +6,7 @@ from types import MappingProxyType
 
 from argus.intent import Intent, IntentType
 from argus.planner import Plan, PlanStatus, PlanStep
+from argus.task.builder import TaskBuilder
 
 
 def _intent(**overrides):
@@ -78,12 +79,35 @@ class PlanConstructionTests(unittest.TestCase):
 
         self.assertEqual(plan.metadata["source"], "package_015")
 
+    def test_tasks_defaults_to_empty(self):
+        plan = Plan(originating_intent=_intent())
+
+        self.assertEqual(plan.tasks, ())
+
+    def test_tasks_honored_single(self):
+        task = TaskBuilder().with_name("t1").build()
+        plan = Plan(originating_intent=_intent(), tasks=[task])
+
+        self.assertEqual(plan.tasks, (task,))
+
+    def test_tasks_honored_multiple_preserves_insertion_order(self):
+        t1 = TaskBuilder().with_name("t1").build()
+        t2 = TaskBuilder().with_name("t2").build()
+        t3 = TaskBuilder().with_name("t3").build()
+        plan = Plan(originating_intent=_intent(), tasks=[t1, t2, t3])
+
+        self.assertEqual(plan.tasks, (t1, t2, t3))
+
 
 class PlanImmutabilityTests(unittest.TestCase):
     def setUp(self):
         self.step = PlanStep(description="A", required_capability="cap-1")
+        self.task = TaskBuilder().with_name("t1").build()
         self.plan = Plan(
-            originating_intent=_intent(), steps=[self.step], metadata={"k": "v"}
+            originating_intent=_intent(),
+            steps=[self.step],
+            tasks=[self.task],
+            metadata={"k": "v"},
         )
 
     def test_is_frozen(self):
@@ -99,6 +123,16 @@ class PlanImmutabilityTests(unittest.TestCase):
         source.append(PlanStep(description="B", required_capability="cap-2"))
 
         self.assertEqual(plan.steps, (self.step,))
+
+    def test_tasks_is_a_tuple(self):
+        self.assertIsInstance(self.plan.tasks, tuple)
+
+    def test_tasks_immutable_from_source_list(self):
+        source = [self.task]
+        plan = Plan(originating_intent=_intent(), tasks=source)
+        source.append(TaskBuilder().with_name("t2").build())
+
+        self.assertEqual(plan.tasks, (self.task,))
 
     def test_metadata_is_mapping_proxy(self):
         self.assertIsInstance(self.plan.metadata, MappingProxyType)

@@ -1176,3 +1176,39 @@ Test count is unchanged at 99 (one `ServiceState`-specific test removed, one sta
 - `TaskBuilder.build()` performs no "was `with_name()` ever called" check - an unnamed `Task` (`name=""`) is a valid, buildable value, not an error.
 - `TaskMetadata.extra`'s `MappingProxyType` wrapping is not picklable/deep-copyable via the standard library - an inherent limitation shared by every metadata class in this codebase (`ContextMetadata`, `PlanningMetadata`, `ResponseMetadata`, `TraceMetadata` all wrap `extra` the same way), newly documented here.
 - No execution, no scheduling, no workflows, no tools, no persistence, no concurrency - unchanged from every prior package in this phase.
+
+## Package 030 - Plan Task Integration
+
+### Added
+
+- Added `factory/packages/030_PLAN_TASK_INTEGRATION.md`.
+- Added `tests` coverage for empty task list, single task, multiple tasks, duplicate rejection, insertion order, immutability, builder methods, and planner propagation, across five modified test files - 41 new tests total, no new test file.
+
+### Changed
+
+- **`argus/planner/plan.py`** - `Plan` gained a new field, `tasks: Sequence[Task]`, declared after `steps` and before `metadata`, defaulting to an empty tuple and wrapped in `tuple()` in `__post_init__` - the identical pattern `steps` itself already uses. "Extend the existing immutable: Plan. Add: tasks."
+- **`argus/planning/session.py`** - `PlanningSession` gained a new field, `tasks: Sequence[Task]`, declared after `constraints` and before `metadata`, the identical pattern `goals`/`constraints` already use - satisfying the Architectural Position diagram's own field list ("Goals / Constraints / Metadata / Tasks"), which matches `PlanningSession`'s actual shape, not `Plan`'s. See the Engineering Decision note below.
+- **`argus/planning/builder.py`** - `PlanningSessionBuilder` gained three new fluent methods: `with_task(task)` (validates and appends, rejecting a duplicate `task_id` against every `Task` already accumulated - identity-based duplicate detection, per this codebase's established id-based duplicate-prevention pattern already used by `CapabilityRegistry`/`PluginManager`), `with_tasks(tasks)` (delegates to `with_task()` once per item, in order - not a parallel validation path), and `clear_tasks()` (resets the accumulated task list to empty - the first "reset a collection" method any builder in this codebase has ever exposed). `build()` now passes `tasks=tuple(self._tasks)` to the `PlanningSession` constructor.
+- **`argus/planning/interfaces.py`** - `IPlanningSessionBuilder` gained abstract `with_task`, `with_tasks`, `clear_tasks` methods matching the concrete `PlanningSessionBuilder`'s own new signatures.
+- **`argus/planner/planner.py`** - `create_plan()` gained a new optional keyword parameter, `tasks: Optional[Sequence[Task]] = None`, validated by a new private helper, `_validate_tasks()` (rejects non-list/tuple input, non-`Task` items, and duplicate `task_id`s), and stored on the constructed `Plan` unchanged. `plan_session()` was updated to pass `tasks=planning_session.tasks` through to its own internal `create_plan()` call - "The Planner simply preserves whatever Tasks are supplied during construction. No planning logic changes. No AI. No decomposition." - mirroring exactly how `plan_session()` already carries `constraints` through to `Plan.metadata` (Package 024 precedent).
+- **`argus/planner/interfaces.py`** - `IPlanner.create_plan()`'s abstract method signature and docstring updated in lockstep with the concrete implementation's new `tasks` parameter, keeping interface and implementation in sync per this codebase's established convention.
+- **Engineering Decision**: this package's own work order contains two sections that, read together, do not describe the same object. The "Plan" section says literally, "Extend the existing immutable: Plan. Add: tasks" - a bare class-name reference to `Plan`. But the Architectural Position diagram's own field list, "Goals / Constraints / Metadata / Tasks," matches `PlanningSession`'s actual fields, not `Plan`'s - `Plan` has never had `goals` or `constraints`. The "Planning Builder" section deepens the tension: "Extend the existing PlanningBuilder" can only mean `PlanningSessionBuilder`, the one class in this codebase with "Builder" in its own name in either the Planning or Planner package - `Plan` itself has no dedicated builder. Resolved by implementing `tasks` on **both** `Plan` and `PlanningSession`, rather than picking one interpretation and leaving the other's own literal instruction unaddressed, bridged by `Planner.plan_session()` carrying `PlanningSession.tasks` through to `Plan.tasks` - the only reading under which every sentence in the work order is literally true simultaneously. See `factory/packages/030_PLAN_TASK_INTEGRATION.md`'s own "Engineering Decision" section for the full reasoning.
+
+### Not Changed
+
+- **`argus/bootstrap.py` is completely unchanged** - this package introduces no new class of any kind; it extends four already-shipped classes, none of which is or has ever been an `IService` implementation. Confirmed via `git diff --stat -- argus/bootstrap.py` showing zero lines changed; `CORE_SERVICES_VERSION` remains `"0.2.9"`.
+- **`argus/agent/`, `argus/pipeline/`, `argus/response/`, `argus/trace/`, `argus/runtime/`, `argus/task/` are all unchanged** - "Do not modify: Agent, Pipeline, Response, Execution Trace, Runtime, Scheduler. Only the Planning package changes." Confirmed via `git diff --stat` showing zero lines changed in any of them.
+- **`argus/events/event_types.py` was intentionally left unchanged** - "No new EventTypes." `Planner.create_plan()`/`plan_session()` continue to publish exactly the same `PLAN_CREATED`/`PLAN_UPDATED` events, with unchanged payloads.
+- No task execution, no task scheduling, no task graphs, no workflows, no persistence - "This package does not execute tasks. It only allows the Planner to describe work at a finer level of detail."
+
+### ADR Update
+
+- None. This package introduces no new class of any kind and registers no new core service - `Plan`, `PlanningSession`, and `PlanningSessionBuilder` are not `IService` implementations, and `Planner` is not gated by `IService` either (an unchanged, pre-existing fact, not a decision made by this package).
+
+### Known Limitations
+
+- **A `Plan`/`PlanningSession` constructed directly (not via `Planner`/`PlanningSessionBuilder`) performs no duplicate-`task_id` rejection of its own** - exactly like `Plan`'s own pre-existing, identical behavior toward duplicate `steps`. Duplicate rejection is enforced only by `Planner._validate_tasks()` and `PlanningSessionBuilder.with_task()`.
+- **Tasks are never generated, decomposed, or scheduled by anything in this package** - by design. A `Plan`'s `tasks` collection is populated exclusively by whatever the caller explicitly supplies.
+- **No task graph, dependency ordering, or workflow relationship between Tasks exists** - `Plan.tasks`/`PlanningSession.tasks` are flat, ordered sequences with no notion of one Task depending on another.
+- **`clear_tasks()` has no counterpart on `goals`/`constraints`** - an intentional asymmetry, since this package's own work order names `clear_tasks()` explicitly and neither prior package's own work order asked for the equivalent on any other collection field.
+- No execution, no scheduling, no workflows, no tools, no persistence, no concurrency - unchanged from every prior package in this phase.

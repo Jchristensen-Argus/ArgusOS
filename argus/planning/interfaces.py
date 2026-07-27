@@ -3,7 +3,10 @@ Public interface contract for the ArgusOS Planning Session.
 
 Purpose:
     Define IPlanningSessionBuilder, the contract other modules depend
-    on, per factory/packages/023_PLANNING_SESSION.md.
+    on, per factory/packages/023_PLANNING_SESSION.md, as amended by
+    factory/packages/030_PLAN_TASK_INTEGRATION.md's own explicit "Add
+    fluent methods: with_task(task), with_tasks(tasks), clear_tasks()"
+    instruction.
 
 Architectural Note - This Is Not An IService:
     Directly reuses argus.context.interfaces.ICognitiveContextBuilder's
@@ -44,7 +47,8 @@ Architectural Note - No Events, No Lifecycle Gating Question:
 
 Responsibilities:
     - IPlanningSessionBuilder: with_context / with_goal /
-      with_constraint / with_metadata / build.
+      with_constraint / with_task / with_tasks / clear_tasks /
+      with_metadata / build.
 
 Non-Responsibilities:
     - This module implements no behavior; see
@@ -57,16 +61,18 @@ Dependencies:
     argus.context.context (CognitiveContext),
     argus.planning.constraint (PlanningConstraint),
     argus.planning.goal (PlanningGoal),
-    argus.planning.session (PlanningSession).
+    argus.planning.session (PlanningSession),
+    argus.task.task (Task) - Package 030.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Sequence
 
 from argus.context.context import CognitiveContext
 from argus.planning.constraint import PlanningConstraint
 from argus.planning.goal import PlanningGoal
 from argus.planning.session import PlanningSession
+from argus.task.task import Task
 
 
 class IPlanningSessionBuilder(ABC):
@@ -94,6 +100,25 @@ class IPlanningSessionBuilder(ABC):
         """Append one PlanningConstraint. Accumulates across multiple
         calls. Raises InvalidPlanningSessionError if `constraint` is
         not a PlanningConstraint instance."""
+
+    @abstractmethod
+    def with_task(self, task: Task) -> "IPlanningSessionBuilder":
+        """Append one Task. Accumulates across multiple calls. Raises
+        InvalidPlanningSessionError if `task` is not a Task instance,
+        or if its `task_id` matches a Task already accumulated -
+        "no duplicates" (Package 030)."""
+
+    @abstractmethod
+    def with_tasks(self, tasks: Sequence[Task]) -> "IPlanningSessionBuilder":
+        """Append every Task in `tasks`, in order, by calling
+        with_task() once per item - not a second validation path.
+        Raises InvalidPlanningSessionError if `tasks` is not a list or
+        tuple, or if any item fails with_task()'s own validation."""
+
+    @abstractmethod
+    def clear_tasks(self) -> "IPlanningSessionBuilder":
+        """Reset this builder's accumulated tasks back to empty.
+        Does not affect any other accumulated field."""
 
     @abstractmethod
     def with_metadata(self, key: str, value: Any) -> "IPlanningSessionBuilder":
