@@ -652,7 +652,7 @@ from argus.services import IServiceRegistry, InMemoryServiceRegistry, ServiceDes
 #   • Git tag
 #
 # Every core ServiceDescriptor registered during bootstrap uses this value.
-CORE_SERVICES_VERSION = "0.3.2"
+CORE_SERVICES_VERSION = "0.3.3"
 
 
 def bootstrap() -> Application:
