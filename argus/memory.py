@@ -1,27 +1,9 @@
-import json
-from pathlib import Path
+"""
+DEPRECATED — pre-Factory prototype, retired per ADR-0004.
 
-
-class Memory:
-
-    def __init__(self):
-
-        self.memory_file = Path("memory/memories.json")
-        self.memories = self.load()
-
-    def recall(self):
-        return self.memories
-    
-    def save(self):
-        with open(self.memory_file, "w") as file:
-            json.dump(self.memories, file, indent=4)
-
-    def load(self):
-
-        with open(self.memory_file, "r") as file:
-            return json.load(file)
-        
-    def remember(self, text):
-
-        self.memories.append(text)
-        self.save()    
+See argus/ai.py's module docstring for the full explanation. Note:
+this flat module's name collided with the real argus/memory/ package
+(Package 007, MemoryService) — that package is entirely unaffected by
+this file; Python always resolved argus.memory to the package
+directory, never to this file. Do not import from this module.
+"""

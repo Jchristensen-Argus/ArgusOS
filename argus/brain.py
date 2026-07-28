@@ -1,23 +1,7 @@
-class Brain:
-    """
-    The Brain decides what Argus should do.
+"""
+DEPRECATED — pre-Factory prototype, retired per ADR-0004.
 
-    It never performs the work itself.
-    It only identifies the user's intent.
-    """
-
-    def think(self, message):
-
-        text = message.lower().strip()
-
-        if text.startswith("remember"):
-            return "remember"
-
-        if text in [
-            "memories",
-            "what do you remember",
-            "show my memories"
-        ]:
-            return "memories"
-
-        return "chat"
+See argus/ai.py's module docstring for the full explanation (same
+retirement, same reason, same caveat about the sandbox mount not
+permitting file deletion). Do not import from this module.
+"""

@@ -1,0 +1,50 @@
+[
+  {
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "contact_id": "aa69bd12-577f-4c96-9434-b120c41d9a75",
+    "email": "jane@acme.com",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "metadata": {
+      "correlation_id": "07ef77c1-22d8-434e-a7cc-5f435d63eeb6",
+      "created_at": "2026-07-28T02:12:38.840175+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "notes": "",
+    "phone": "555-1111",
+    "title": "VP Sales"
+  },
+  {
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "contact_id": "d0ff53fb-9734-4086-8961-1b6f9030210c",
+    "email": "bob@betaboxes.com",
+    "first_name": "Bob",
+    "last_name": "Lee",
+    "metadata": {
+      "correlation_id": "cc0efb2c-6329-486f-8025-2b2b75fb0c56",
+      "created_at": "2026-07-28T02:12:38.840302+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "notes": "",
+    "phone": "555-2222",
+    "title": "Owner"
+  },
+  {
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "contact_id": "be67443e-a9d7-481d-9f90-d617749f12a7",
+    "email": "ann@gammacartons.com",
+    "first_name": "Ann",
+    "last_name": "Kim",
+    "metadata": {
+      "correlation_id": "4464c1a3-64c2-497a-b05f-ac7182a2fd56",
+      "created_at": "2026-07-28T02:12:38.840363+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "notes": "",
+    "phone": "555-3333",
+    "title": "Director of Procurement"
+  }
+]

@@ -1,0 +1,242 @@
+[
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "contact_id": "aa69bd12-577f-4c96-9434-b120c41d9a75",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "464b40ad-4ca2-4fce-a267-aac6fbbf5cfb",
+    "metadata": {
+      "correlation_id": "86ca0289-ea1e-4048-869f-0bc0eb62e83c",
+      "created_at": "2026-07-28T02:12:38.840210+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "First contact from ZoomInfo",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "West"
+  },
+  {
+    "campaign_id": "",
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "contact_id": "d0ff53fb-9734-4086-8961-1b6f9030210c",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "a7625df3-9268-4196-8225-d2720935531a",
+    "metadata": {
+      "correlation_id": "e74693ad-82fb-4a83-8752-db92b4b98674",
+      "created_at": "2026-07-28T02:12:38.840310+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "No campaign yet",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "East"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "contact_id": "be67443e-a9d7-481d-9f90-d617749f12a7",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "06ade0e0-9f3f-4acb-926e-5075fe90bbd0",
+    "metadata": {
+      "correlation_id": "ba1f26a7-5fb1-48a5-9a5c-840315e800eb",
+      "created_at": "2026-07-28T02:12:38.840372+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "Warm intro from trade show",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "South"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "contact_id": "aa69bd12-577f-4c96-9434-b120c41d9a75",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "1e4d23a1-8e9e-46d3-94de-5b0b1bf4caf5",
+    "metadata": {
+      "correlation_id": "8a9e4460-cfcc-46e7-a3dd-646eb509eecc",
+      "created_at": "2026-07-28T02:12:50.498035+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "First contact from ZoomInfo",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "West"
+  },
+  {
+    "campaign_id": "",
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "contact_id": "d0ff53fb-9734-4086-8961-1b6f9030210c",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "64c21d62-b3fd-424e-ad11-05583a1b4561",
+    "metadata": {
+      "correlation_id": "38d6393e-856c-46b9-b8ce-09668eb11a83",
+      "created_at": "2026-07-28T02:12:50.498166+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "No campaign yet",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "East"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "contact_id": "be67443e-a9d7-481d-9f90-d617749f12a7",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "efa73dd0-2e00-4322-8088-fbc252e2fd2c",
+    "metadata": {
+      "correlation_id": "92d5532a-6cc0-4886-8a3d-c0fe01567c73",
+      "created_at": "2026-07-28T02:12:50.498219+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "Warm intro from trade show",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "South"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "contact_id": "aa69bd12-577f-4c96-9434-b120c41d9a75",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "c4214039-8b49-432a-b19b-94dd0277d2d0",
+    "metadata": {
+      "correlation_id": "036d59a0-7585-4574-b5a8-1813be897ae5",
+      "created_at": "2026-07-28T02:14:50.856436+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "First contact from ZoomInfo",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "West"
+  },
+  {
+    "campaign_id": "",
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "contact_id": "d0ff53fb-9734-4086-8961-1b6f9030210c",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "ecf319ab-a1a6-48b9-9890-7d5613e88f3c",
+    "metadata": {
+      "correlation_id": "a5084d83-96c5-4bbc-b34b-beb837589c8f",
+      "created_at": "2026-07-28T02:14:50.856557+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "No campaign yet",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "East"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "contact_id": "be67443e-a9d7-481d-9f90-d617749f12a7",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "bead19e9-313f-4291-a7c2-60fd06009914",
+    "metadata": {
+      "correlation_id": "70e29a1c-dcf8-4946-84d8-cda8c8893405",
+      "created_at": "2026-07-28T02:14:50.856611+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "Warm intro from trade show",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "South"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "contact_id": "aa69bd12-577f-4c96-9434-b120c41d9a75",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "8f02fc7e-306c-43e7-8211-27748de9aba4",
+    "metadata": {
+      "correlation_id": "5c9cbabe-b40a-443e-a0da-387ae01b54e5",
+      "created_at": "2026-07-28T02:14:59.403387+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "First contact from ZoomInfo",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "West"
+  },
+  {
+    "campaign_id": "",
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "contact_id": "d0ff53fb-9734-4086-8961-1b6f9030210c",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "43ba6732-5a5f-4114-8a7b-9e1186d18050",
+    "metadata": {
+      "correlation_id": "21ebc5b6-d21f-4bd1-850b-a9311bdf1f50",
+      "created_at": "2026-07-28T02:14:59.403495+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "No campaign yet",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "East"
+  },
+  {
+    "campaign_id": "440addb2-f307-450a-9101-8ea92fde7fd9",
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "contact_id": "be67443e-a9d7-481d-9f90-d617749f12a7",
+    "dynamics_record_id": "",
+    "last_touch_date": null,
+    "lead_id": "4c40d9ca-9a2b-4967-938a-bcc88af18e35",
+    "metadata": {
+      "correlation_id": "12f40c7c-f6d7-4f56-a842-748c1d1fb505",
+      "created_at": "2026-07-28T02:14:59.403548+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "next_touch_date": null,
+    "notes": "Warm intro from trade show",
+    "source": "lead_workspace_import",
+    "status": "new",
+    "sync_state": "not_synced",
+    "territory": "South"
+  }
+]

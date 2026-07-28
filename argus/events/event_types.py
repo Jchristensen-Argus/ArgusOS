@@ -347,3 +347,23 @@ class EventType(Enum):
     DECISION_EVALUATED = "decision_evaluated"
     DECISION_CREATED = "decision_created"
     DECISION_FAILED = "decision_failed"
+
+    # Added for argus.modules.sales (the Sales Module, Sprint 1), per
+    # this module's own "single place new event types are added" scope
+    # note above - but deliberately NOT following the one-member-per-
+    # lifecycle-event precedent every package above this one set. Those
+    # are all Core packages adding Core vocabulary; a Module adding
+    # entries like LEAD_CREATED/CAMPAIGN_CREATED/WORK_ITEM_COMPLETED the
+    # same way would put business-specific vocabulary into this Core
+    # file, and would repeat for every future Module (Ecommerce, Amazon,
+    # Marketing, ...), turning this enum into an unbounded, Module-aware
+    # registry - a violation of the Cognitive Architecture's CA-10 ("Core
+    # remains domain-agnostic... never imports, references, or assumes a
+    # Module's... concepts") that grows a little with every Module built.
+    # Instead: one generic member per Module, added once, permanently.
+    # The specific event (e.g. "LeadCreated", "WorkItemCompleted") lives
+    # in Event.payload's "event_name" field, not as a new EventType
+    # member - see argus/modules/sales/events.py for the publishing
+    # helper and the documented payload shape. Future Modules follow the
+    # same one-member-per-Module pattern, not one-member-per-event.
+    SALES_MODULE_EVENT = "sales_module_event"

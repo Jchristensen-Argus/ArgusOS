@@ -1,0 +1,44 @@
+[
+  {
+    "company_id": "59c697c2-bfb2-47cf-ac3a-5f870e39f240",
+    "industry": "Manufacturing",
+    "metadata": {
+      "correlation_id": "e03b982e-17da-4add-90e9-166e10f5162a",
+      "created_at": "2026-07-28T02:12:38.840144+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "name": "Acme Packaging",
+    "notes": "",
+    "territory": "West",
+    "website": "acme.com"
+  },
+  {
+    "company_id": "5b17bfb6-a738-4c7c-b329-7c2817ee27ad",
+    "industry": "Manufacturing",
+    "metadata": {
+      "correlation_id": "18131531-ec98-4ef1-bdbf-ab70627b60d2",
+      "created_at": "2026-07-28T02:12:38.840290+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "name": "Beta Boxes",
+    "notes": "",
+    "territory": "East",
+    "website": "betaboxes.com"
+  },
+  {
+    "company_id": "8a31f75d-d612-4aaf-be3e-369efd886fd3",
+    "industry": "Packaging",
+    "metadata": {
+      "correlation_id": "6e099c15-d79c-464b-8f2b-0335482b62fa",
+      "created_at": "2026-07-28T02:12:38.840354+00:00",
+      "extra": {},
+      "version": "1.0"
+    },
+    "name": "Gamma Cartons",
+    "notes": "",
+    "territory": "South",
+    "website": "gammacartons.com"
+  }
+]
